@@ -33,7 +33,7 @@ do_tmp(int nargs)
 	
 	arg_types[0] = &ffi_type_void;
 
-printf("%x\n", func_number);
+printf("%016lx\n", func_number);
 
 	// Prepare the ffi_cif structure.
 	if ((status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
@@ -168,53 +168,79 @@ dlload(NODE *tree, void *dl)
 //---------------------------------------------
 
 //---------------------------------------------
-func_number = 0x9894;
+func_number = 0x00003068;
+printf("%016lx\n", func_number);
+#if ARCH_X86
 char ins[16];
+#elif ARCH_X64
+char ins[32];
+#endif
+signed int addr_diff; // 5 is ins next of jmp
 int i = 0;
 
-// mov imm to func_number
+//// mov imm to func_number
+#if ARCH_X64
+#define LENGTH_OF_MOV_INSTRUCTION	11
+addr_diff = (void*)&func_number - (void*)(exec_page + (sizeof(ins) / sizeof(ins[0])) * 0 + i + LENGTH_OF_MOV_INSTRUCTION);
+// printf("%016p %016p %016p \n", (void *)addr_diff , &func_number , (void*)(exec_page + (sizeof(ins) / sizeof(ins[0])) * 0 + i + 10));
+
+ins[i++] = 0x48;	// REX Prefix
+#endif
+//#if ARCH_X86 || ARCH_X64
 ins[i++] = 0xc7;	// x86 mov instruction
 ins[i++] = 0x05;	// ModR/M Byte
-ins[i++] = (char)(((unsigned int)&func_number      ) & 0xff);
-ins[i++] = (char)(((unsigned int)&func_number >>  8) & 0xff);
-ins[i++] = (char)(((unsigned int)&func_number >> 16) & 0xff);
-ins[i++] = (char)(((unsigned int)&func_number >> 24) & 0xff);
+//#endif
+#if ARCH_X86
+ins[i++] = (char)(((unsigned long)&func_number      ) & 0xff);
+ins[i++] = (char)(((unsigned long)&func_number >>  8) & 0xff);
+ins[i++] = (char)(((unsigned long)&func_number >> 16) & 0xff);
+ins[i++] = (char)(((unsigned long)&func_number >> 24) & 0xff);
+#elif ARCH_X64
+ins[i++] = (char)(((signed long)addr_diff      ) & 0xff);
+ins[i++] = (char)(((signed long)addr_diff >>  8) & 0xff);
+ins[i++] = (char)(((signed long)addr_diff >> 16) & 0xff);
+ins[i++] = (char)(((signed long)addr_diff >> 24) & 0xff);
+#endif
+// #if ARCH_X64
+// ins[i++] = (char)(((unsigned long)&func_number >> 32) & 0xff);
+// ins[i++] = (char)(((unsigned long)&func_number >> 40) & 0xff);
+// ins[i++] = (char)(((unsigned long)&func_number >> 48) & 0xff);
+// ins[i++] = (char)(((unsigned long)&func_number >> 56) & 0xff);
+// #endif
 ins[i++] = (char)(((unsigned int)func_number      ) & 0xff);
 ins[i++] = (char)(((unsigned int)func_number >>  8) & 0xff);
 ins[i++] = (char)(((unsigned int)func_number >> 16) & 0xff);
 ins[i++] = (char)(((unsigned int)func_number >> 24) & 0xff);
-
-// ins[i++] = (char)(((unsigned int)&func_number >> 24) & 0xff);
-// ins[i++] = (char)(((unsigned int)&func_number >> 16) & 0xff);
-// ins[i++] = (char)(((unsigned int)&func_number >>  8) & 0xff);
-// ins[i++] = (char)(((unsigned int)&func_number      ) & 0xff);
-// 
-// ins[i++] = (char)(((unsigned int)&func_number >> 24) & 0xff);
-// ins[i++] = (char)(((unsigned int)&func_number >> 16) & 0xff);
-// ins[i++] = (char)(((unsigned int)&func_number >>  8) & 0xff);
-// ins[i++] = (char)(((unsigned int)&func_number      ) & 0xff);
+// #if ARCH_X64
+// ins[i++] = (char)(((unsigned long)func_number >> 32) & 0xff);
+// ins[i++] = (char)(((unsigned long)func_number >> 40) & 0xff);
+// ins[i++] = (char)(((unsigned long)func_number >> 48) & 0xff);
+// ins[i++] = (char)(((unsigned long)func_number >> 56) & 0xff);
+// #endif
 
 
 // jmp to do_tmp
 // x86 jmp instruction
 // E9 cw JMP rel16 æ¬¡ã®å½ä»¤ã¨ã®ç¸å¯¾åéåã ãç¸å¯¾ near ã¸ã£ã³ãããã
 // E9 cd JMP rel32 æ¬¡ã®å½ä»¤ã¨ã®ç¸å¯¾åéåã ãç¸å¯¾ near ã¸ã£ã³ãããã
-signed int addr_diff = (void*)do_tmp - (void*)(exec_page + 16 * 0 + i + 5); // 5 is ins next of jmp
+#define LENGTH_OF_JMP_INSTRUCTION	5
+addr_diff = (void*)do_tmp - (void*)(exec_page + (sizeof(ins) / sizeof(ins[0])) * 0 + i + LENGTH_OF_JMP_INSTRUCTION); // 5 is ins next of jmp
 ins[i++] = 0xe9;	// x86 jmp instruction
-ins[i++] = (char)(((signed int)addr_diff      ) & 0xff);
-ins[i++] = (char)(((signed int)addr_diff >>  8) & 0xff);
-ins[i++] = (char)(((signed int)addr_diff >> 16) & 0xff);
-ins[i++] = (char)(((signed int)addr_diff >> 24) & 0xff);
+ins[i++] = (char)(((signed long)addr_diff      ) & 0xff);
+ins[i++] = (char)(((signed long)addr_diff >>  8) & 0xff);
+ins[i++] = (char)(((signed long)addr_diff >> 16) & 0xff);
+ins[i++] = (char)(((signed long)addr_diff >> 24) & 0xff);
 
 // fill by nop
-for ( ; i < 16; i++) {
-	//ins[i] = 0x90;
+for ( ; i < (sizeof(ins) / sizeof(ins[0])); i++) {
+	ins[i] = 0x90;
 }
 
-memcpy(exec_page, ins, 16);
+memcpy(exec_page, ins, (sizeof(ins) / sizeof(ins[0])));
 //---------------------------------------------
 
 #if 0
+ printf("%d\n",i);
  printf("%02x %02x %02x %02x %02x %p %x %x %x\n",
  *((unsigned char*)exec_page+0),
  *((unsigned char*)exec_page+1),
