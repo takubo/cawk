@@ -6,14 +6,8 @@ hello(void)
 	puts("hello");
 }
 
-void
-bye(void)
-{
-	puts("bye");
-}
-
 double
-abs(double n)
+square(double n)
 {
-	return fabs(n);
+	return n * n;
 }

@@ -4,13 +4,11 @@
 #include <dlfcn.h>
 #include <ffi.h>
 
-#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 
 #include "awk.h"
 
@@ -22,6 +20,13 @@
 
 int plugin_is_GPL_compatible;
 
+struct shlib_t {
+	char lib_name[64];
+	void *lib_ptr;
+};
+
+struct shlib_t shlib[16];
+	
 struct ffi_func_args_t {
 	ffi_cif cif;
 	void *func_ptr;
@@ -31,12 +36,12 @@ struct ffi_func_args_t {
 	void **arg_values;
 };
 
-struct ffi_func_args_t ffi_func_args[1024];
+struct ffi_func_args_t ffi_func_args[512];
 
-
-void *DL;
 
 void *exec_page;
+
+unsigned int shlib_number;
 
 unsigned int func_number;
 unsigned int call_func_number;
@@ -192,6 +197,17 @@ void fff()
 #endif
 }
 
+static void*
+lookup_shlib(const char *name)
+{
+	int i;
+
+	for (i = 0; i < 16; i++)
+		if (!strcmp(name, shlib[i].lib_name))
+			return shlib[i].lib_ptr;
+	return NULL;
+}
+
 static NODE*
 do_c_func_resist(int nargs)
 {
@@ -200,6 +216,7 @@ do_c_func_resist(int nargs)
 	NODE *fun;
 	NODE *arg;
 	int i;
+	void *dl;
 	void *func;
         ffi_cif cif;
 	int arg_num;
@@ -216,7 +233,9 @@ do_c_func_resist(int nargs)
 	arg = (NODE *) get_scalar_argument(2, FALSE);
 	force_string(arg);
 
-	func = dlsym(DL, fun->stptr);
+	dl = lookup_shlib(lib->stptr);
+
+	func = dlsym(dl, fun->stptr);
 	if (func == NULL) {
 		msg(_("fatal: extension: library `%s': cannot call function `%s' (%s)\n"),
 				"obj->stptr", fun->stptr, dlerror());
@@ -247,6 +266,7 @@ do_c_func_resist(int nargs)
 		func_type = &ffi_type_pointer;
 		break;
 	default:
+		func_type = NULL; // surppress warning
 		break;
 	}
 
@@ -293,8 +313,7 @@ do_c_func_resist(int nargs)
         }
 
 	fff();
-	// make_builtin(fun->stptr, do_tmp, arg_num);
-// printf("%s %p %d %x\n",fun->stptr, (NODE*(*)(int))(exec_page + func_number * INS_SIZE), arg_num, *(char *)(exec_page + func_number * INS_SIZE));
+
 	make_builtin(fun->stptr, (NODE*(*)(int))(exec_page + func_number * INS_SIZE), arg_num);
 
 	ffi_func_args[func_number].func_ptr = func;
@@ -328,7 +347,11 @@ do_load_shlib(int nargs)
 			obj->stptr, dlerror());
 		gawk_exit(EXIT_FATAL);
 	}
-	DL = dl;
+
+	strcpy(shlib[shlib_number].lib_name, obj->stptr);
+	shlib[shlib_number].lib_ptr = dl;
+
+	shlib_number++;
 
 	return make_number((AWKNUM) 0);
 }
@@ -347,41 +370,10 @@ dlload(NODE *tree, void *dl)
 
 	exec_page = mmap(NULL, pagesize * 1, PROT_WRITE | PROT_EXEC,
 				MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	// munmap
 
+	shlib_number = 0;
 	func_number = 0;
-// munmap
-
 
 	return make_number((AWKNUM) 0);
 }
-
-#if 0
-static NODE*
-do_c_fllunc_resist(int nargs)
-{
-	NODE *fun;
-	char cunc_name;
-
-	NODE *(*func)(NODE *, void *);
-	NODE *tmp = NULL;
-	fun = POP_STRING();
-
-	func = (NODE *(*)(NODE *, void *)) dlsym(dl, fun->stptr);
-	if (func == NULL) {
-		msg(_("fatal: extension: library `%s': cannot call function `%s' (%s)\n"),
-				obj->stptr, fun->stptr, dlerror());
-		fatal_error = TRUE;
-		goto done;
-	}
-
-	tmp = (*func)(obj, dl);
-	if (tmp == NULL)
-		tmp = Nnull_string;
-
-	DEREF(fun);
-
-	make_builtin(func_name, do_tmp, arg_num);
-	return make_number((AWKNUM) 0);
-}
-
-#endif
