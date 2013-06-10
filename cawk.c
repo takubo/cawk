@@ -70,15 +70,20 @@ do_tmp(int nargs)
 #if 1
 		if (ffi_func_args[fnum].arg_types[i] == &ffi_type_void) {
 		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_sint) {
-			*(int *)ffi_func_args[fnum].arg_values[i] = (int) force_number(arg);
+			*(int *)ffi_func_args[fnum].arg_values[i] =
+					(int) force_number(arg);
 		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_uint) {
-			*(unsigned int *)ffi_func_args[fnum].arg_values[i] = (unsigned int) force_number(arg);
+			*(unsigned int *)ffi_func_args[fnum].arg_values[i] =
+					(unsigned int) force_number(arg);
 		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_float) {
-			*(float *)ffi_func_args[fnum].arg_values[i] = (float) force_number(arg);
+			*(float *)ffi_func_args[fnum].arg_values[i] =
+					(float) force_number(arg);
 		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_double) {
-			*(double *)ffi_func_args[fnum].arg_values[i] = (double) force_number(arg);
+			*(double *)ffi_func_args[fnum].arg_values[i] =
+					(double) force_number(arg);
 		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_pointer) {
-			*(void **)ffi_func_args[fnum].arg_values[i] = (void *) (unsigned int) force_number(arg);
+			*(void **)ffi_func_args[fnum].arg_values[i] =
+					(void *) (unsigned int) force_number(arg);
                 }
 #else
 		switch (ffi_func_args[fnum].arg_types[i]) {
@@ -137,11 +142,11 @@ void fff()
 	// mov imm to func_number
 #if ARCH_X64
 	#define LENGTH_OF_MOV_INSTRUCTION	11
-	addr_diff = (void*)&call_func_number -
-		(void*)(exec_page + INS_SIZE * func_number + i + LENGTH_OF_MOV_INSTRUCTION);
+	addr_diff = (void*)&call_func_number - (void*)(exec_page
+			+ INS_SIZE * func_number + i + LENGTH_OF_MOV_INSTRUCTION);
 	ins[i++] = 0x48;	// REX Prefix
 #endif
-	ins[i++] = 0xc7;	// x86 mov instruction
+	ins[i++] = 0xc7;	// x86/x64 mov instruction
 	ins[i++] = 0x05;	// ModR/M Byte
 #if ARCH_X86
 	ins[i++] = (char)(((unsigned long)&call_func_number      ) & 0xff);
@@ -160,19 +165,18 @@ void fff()
 	ins[i++] = (char)(((unsigned int)func_number >> 24) & 0xff);
 
 	// jmp to do_tmp
-	// x86 jmp instruction
-	// E9 cw JMP rel16 æ¬¡ã®å½ä»¤ã¨ã®ç¸å¯¾åéåã ãç¸å¯¾ near ã¸ã£ã³ãããã
-	// E9 cd JMP rel32 æ¬¡ã®å½ä»¤ã¨ã®ç¸å¯¾åéåã ãç¸å¯¾ near ã¸ã£ã³ãããã
+	// x86/x64 jmp instruction
+	//	E9 cd JMP rel32
 	#define LENGTH_OF_JMP_INSTRUCTION	5
-	addr_diff = (void*)do_tmp -
-		(void*)(exec_page + INS_SIZE * func_number + i + LENGTH_OF_JMP_INSTRUCTION);
-	ins[i++] = 0xe9;	// x86 jmp instruction
+	addr_diff = (void*)do_tmp - (void*)(exec_page
+			+ INS_SIZE * func_number + i + LENGTH_OF_JMP_INSTRUCTION);
+	ins[i++] = 0xe9;	// x86/x64 jmp instruction
 	ins[i++] = (char)(((signed long)addr_diff      ) & 0xff);
 	ins[i++] = (char)(((signed long)addr_diff >>  8) & 0xff);
 	ins[i++] = (char)(((signed long)addr_diff >> 16) & 0xff);
 	ins[i++] = (char)(((signed long)addr_diff >> 24) & 0xff);
 
-	// fill by nop
+	// fill by NOP instruction
 	for ( ; i < INS_SIZE; i++) {
 		ins[i] = 0x90;
 	}
@@ -237,7 +241,8 @@ do_c_func_resist(int nargs)
 
 	func = dlsym(dl, fun->stptr);
 	if (func == NULL) {
-		msg(_("fatal: extension: library `%s': cannot call function `%s' (%s)\n"),
+		msg(_(
+		    "fatal: extension: library `%s': cannot call function `%s' (%s)\n"),
 				"obj->stptr", fun->stptr, dlerror());
 		gawk_exit(EXIT_FATAL);
 		return NULL; /* surppress warning */
@@ -314,7 +319,8 @@ do_c_func_resist(int nargs)
 
 	fff();
 
-	make_builtin(fun->stptr, (NODE*(*)(int))(exec_page + func_number * INS_SIZE), arg_num);
+	make_builtin(fun->stptr,
+			(NODE*(*)(int))(exec_page + func_number * INS_SIZE), arg_num);
 
 	ffi_func_args[func_number].func_ptr = func;
 	ffi_func_args[func_number].cif = cif;
