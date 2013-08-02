@@ -218,6 +218,7 @@ do_c_func_resist(int nargs)
 	ffi_status status;
 	NODE *lib;
 	NODE *fun;
+	NODE *ret;
 	NODE *arg;
 	int i;
 	void *dl;
@@ -234,7 +235,10 @@ do_c_func_resist(int nargs)
 	fun = (NODE *) get_scalar_argument(1, FALSE);
 	force_string(fun);
 
-	arg = (NODE *) get_scalar_argument(2, FALSE);
+	ret = (NODE *) get_scalar_argument(2, FALSE);
+	force_string(ret);
+
+	arg = (NODE *) get_scalar_argument(3, FALSE);
 	force_string(arg);
 
 	dl = lookup_shlib(lib->stptr);
@@ -248,9 +252,7 @@ do_c_func_resist(int nargs)
 		return NULL; /* surppress warning */
 	}
 
-	arg_num = strlen(arg->stptr) - 1;
-
-	switch (arg->stptr[0]) {
+	switch (ret->stptr[0]) {
 	case 'v':
 		func_type = &ffi_type_void;
 		break;
@@ -275,12 +277,14 @@ do_c_func_resist(int nargs)
 		break;
 	}
 
+	arg_num = strlen(arg->stptr);
+
 	arg_types = malloc(arg_num * sizeof(ffi_type *));
 	arg_values = malloc(arg_num * sizeof(void *));
 
 	for (i = 0; i < arg_num; i++) {
 		//printf ("%c\n",arg->stptr[i + 1]);
-		switch (arg->stptr[i + 1]) {
+		switch (arg->stptr[i]) {
 		case 'v':
 			arg_types[i] = &ffi_type_void;
 			arg_values[i] = NULL;
