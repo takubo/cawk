@@ -1,13 +1,26 @@
-CFLAGS = -Wall -fPIC -shared -g -c -O2 -DHAVE_STRING_H -DHAVE_SNPRINTF -DHAVE_STDARG_H -DHAVE_VPRINTF -DDYNAMIC -I${HOME}/gawk-4.0.1 -DARCH_X64
-LDFLAGS = -shared
-KAO = cawk
+uname_m = $(shell uname -m)
 
-all: ${KAO}.so hello.so
+ifeq ($(uname_m), i686)
+	ARCH = ARCH_X86
+endif
+
+ifeq ($(uname_m), x86_64)
+	ARCH = ARCH_X64
+endif
+
+CFLAGS = -Wall -fPIC -shared -g -c -O2 \
+         -DDYNAMIC \
+         -DHAVE_STRING_H -DHAVE_SNPRINTF -DHAVE_STDARG_H -DHAVE_VPRINTF \
+         -I${HOME}/gawk-4.0.1 -D${ARCH}
+
+LDFLAGS = -shared
+
+all: cawk.so hello.so
 	~/gawk-4.0.1/gawk -f hello.awk
 
-${KAO}.so: ${KAO}.c makefile
-	gcc ${CFLAGS} ${KAO}.c -o ${KAO}.o
-	gcc ${LDFLAGS} ${KAO}.o -lffi -o ${KAO}.so
+cawk.so: cawk.c makefile
+	gcc ${CFLAGS} cawk.c -o cawk.o
+	gcc ${LDFLAGS} cawk.o -lffi -o cawk.so
 
 CFLAGS2 = -Wall -fPIC -shared -g -c -O2 
 hello.so: hello.c makefile
