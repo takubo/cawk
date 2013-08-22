@@ -1,5 +1,4 @@
 #include <sys/mman.h>
-#include <malloc.h>
 
 #include <dlfcn.h>
 #include <ffi.h>
@@ -31,7 +30,7 @@ NODE *dlload(NODE *tree, void *dl);
 int plugin_is_GPL_compatible;
 
 
-int pagesize;
+static int pagesize;
 
 
 struct shlib_t {
@@ -39,7 +38,7 @@ struct shlib_t {
 	void *lib_ptr;
 };
 
-struct shlib_t shlib[16];
+static struct shlib_t shlib[16];
 
 	
 struct ffi_func_args_t {
@@ -51,27 +50,27 @@ struct ffi_func_args_t {
 	void **arg_values;
 };
 
-struct ffi_func_args_t ffi_func_args[512];
+static struct ffi_func_args_t ffi_func_args[512];
 
 
-void *exec_page;
+static void *exec_page;
 
-unsigned int shlib_number;
+static unsigned int shlib_number;
 
-unsigned int func_number;
-unsigned int call_func_number;
-
-union func_result {
-	ffi_sarg sint;
-	ffi_arg uint;
-	float flt;
-	double dbl;
-	void *ptr;
-};
+static unsigned int func_number;
+static unsigned int call_func_number;
 
 static NODE *
 do_pseudo(int nargs)
 {
+	union func_result {
+		ffi_sarg sint;
+		ffi_arg uint;
+		float flt;
+		double dbl;
+		void *ptr;
+	};
+
 	unsigned int fnum;
 	void **arg_values;
 	union func_result result;
@@ -284,8 +283,8 @@ do_resist_func(int nargs)
 
 	arg_num = strlen(arg->stptr);
 
-	arg_types = malloc(arg_num * sizeof(ffi_type *));
-	arg_values = malloc(arg_num * sizeof(void *));
+	emalloc(arg_types, ffi_type **, arg_num * sizeof(ffi_type *), "resist_func");
+	emalloc(arg_values, void **, arg_num * sizeof(void *), "resist_func");
 
 	for (i = 0; i < arg_num; i++) {
 		//printf ("%c\n",arg->stptr[i + 1]);
@@ -299,27 +298,27 @@ do_resist_func(int nargs)
 		case 'i':
 		case 's':
 			arg_types[i] = &ffi_type_sint;
-			arg_values[i] = malloc(sizeof(int));
+			emalloc(arg_values[i], int *, sizeof(int), "resist_func");
 			break;
 		case 'u':
 			arg_types[i] = &ffi_type_uint;
-			arg_values[i] = malloc(sizeof(unsigned int));
+			emalloc(arg_values[i], unsigned int *, sizeof(unsigned int), "resist_func");
 			break;
 		case 'f':
 			arg_types[i] = &ffi_type_float;
-			arg_values[i] = malloc(sizeof(float));
+			emalloc(arg_values[i], float *, sizeof(float), "resist_func");
 			break;
 		case 'd':
 			arg_types[i] = &ffi_type_double;
-			arg_values[i] = malloc(sizeof(double));
+			emalloc(arg_values[i], double *, sizeof(double), "resist_func");
 			break;
 		case '$':
 			arg_types[i] = &ffi_type_pointer;
-			arg_values[i] = malloc(sizeof(void *));
+			emalloc(arg_values[i], char **, sizeof(char *), "resist_func");
 			break;
 		case 'p':
 			arg_types[i] = &ffi_type_pointer;
-			arg_values[i] = malloc(sizeof(void *));
+			emalloc(arg_values[i], void **, sizeof(void *), "resist_func");
 			break;
 		default:
 			break;
