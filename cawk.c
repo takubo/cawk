@@ -42,7 +42,7 @@ struct ffi_func_t {
 	void **arg_values;
 };
 
-static struct ffi_func_t *ffi_func_args[512];
+//static struct ffi_func_t *ffi_func_args[512];
 
 
 static void *exec_page;
@@ -50,7 +50,7 @@ static void *exec_page;
 static unsigned int shlib_number;
 
 static unsigned int func_number;
-static unsigned int call_func_number;
+static struct ffi_func_t *call_ffi_func;
 
 
 static NODE *do_pseudo(int nargs);
@@ -72,15 +72,16 @@ do_pseudo(int nargs)
 		void *ptr;
 	};
 
-	unsigned int fnum;
+	//unsigned int fnum;
 	struct ffi_func_t *ffi_func;
-	void **arg_values;
+	//void **arg_values;
 	union func_result result;
 	int i;
 	
-	fnum = call_func_number;
-	ffi_func = ffi_func_args[fnum];
-	arg_values = ffi_func->arg_values;
+	//fnum = call_ffi_func;
+	//ffi_func = ffi_func_args[fnum];
+	ffi_func = call_ffi_func;
+	//arg_values = ffi_func->arg_values;
 
 	// printf("%016lx\n", fnum);
 
@@ -145,28 +146,47 @@ set_trampoline(struct ffi_func_t *ffi_func_ptr)
 #if ARCH_X86 || ARCH_X64
 	// mov imm to func_number
 #if ARCH_X64
-	#define LENGTH_OF_MOV_INSTRUCTION	11
-	addr_diff = (void*)&call_func_number - (void*)(exec_page
-			+ INS_SIZE * func_number + i + LENGTH_OF_MOV_INSTRUCTION);
 	ins[i++] = 0x48;	// REX Prefix
 #endif
 	ins[i++] = 0xc7;	// x86/x64 mov instruction
 	ins[i++] = 0x05;	// ModR/M Byte
 #if ARCH_X86
-	ins[i++] = (char)(((unsigned long)&call_func_number      ) & 0xff);
-	ins[i++] = (char)(((unsigned long)&call_func_number >>  8) & 0xff);
-	ins[i++] = (char)(((unsigned long)&call_func_number >> 16) & 0xff);
-	ins[i++] = (char)(((unsigned long)&call_func_number >> 24) & 0xff);
+	ins[i++] = (char)(((unsigned long) &call_ffi_func      ) & 0xff);
+	ins[i++] = (char)(((unsigned long) &call_ffi_func >>  8) & 0xff);
+	ins[i++] = (char)(((unsigned long) &call_ffi_func >> 16) & 0xff);
+	ins[i++] = (char)(((unsigned long) &call_ffi_func >> 24) & 0xff);
 #elif ARCH_X64
-	ins[i++] = (char)(((signed long)addr_diff      ) & 0xff);
-	ins[i++] = (char)(((signed long)addr_diff >>  8) & 0xff);
-	ins[i++] = (char)(((signed long)addr_diff >> 16) & 0xff);
-	ins[i++] = (char)(((signed long)addr_diff >> 24) & 0xff);
+	#define LENGTH_OF_MOV_INSTRUCTION	11
+	addr_diff = (void*)&call_ffi_func - (void*)(exec_page
+			+ INS_SIZE * func_number + i + LENGTH_OF_MOV_INSTRUCTION);
+	ins[i++] = (char)(((signed long) addr_diff      ) & 0xff);
+	ins[i++] = (char)(((signed long) addr_diff >>  8) & 0xff);
+	ins[i++] = (char)(((signed long) addr_diff >> 16) & 0xff);
+	ins[i++] = (char)(((signed long) addr_diff >> 24) & 0xff);
 #endif
-	ins[i++] = (char)(((unsigned int)func_number      ) & 0xff);
-	ins[i++] = (char)(((unsigned int)func_number >>  8) & 0xff);
-	ins[i++] = (char)(((unsigned int)func_number >> 16) & 0xff);
-	ins[i++] = (char)(((unsigned int)func_number >> 24) & 0xff);
+	ins[i++] = (char)(((unsigned int) ffi_func_ptr      ) & 0xff);
+	ins[i++] = (char)(((unsigned int) ffi_func_ptr >>  8) & 0xff);
+	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 16) & 0xff);
+	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 24) & 0xff);
+#if ARCH_X64
+//?++
+	ins[i++] = 0x48;	// REX Prefix
+	ins[i++] = 0xc7;	// x86/x64 mov instruction
+	ins[i++] = 0x05;	// ModR/M Byte
+
+	addr_diff = (void*)&call_ffi_func - (void*)(exec_page
+			+ INS_SIZE * func_number + i + LENGTH_OF_MOV_INSTRUCTION) - 2;
+	ins[i++] = (char)(((signed long) addr_diff      ) & 0xff);
+	ins[i++] = (char)(((signed long) addr_diff >>  8) & 0xff);
+	ins[i++] = (char)(((signed long) addr_diff >> 16) & 0xff);
+	ins[i++] = (char)(((signed long) addr_diff >> 24) & 0xff);
+
+	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 32) & 0xff);
+	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 40) & 0xff);
+	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 48) & 0xff);
+	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 56) & 0xff);
+//?--
+#endif
 
 	// jmp to do_pseudo
 	// x86/x64 jmp instruction
@@ -175,11 +195,11 @@ set_trampoline(struct ffi_func_t *ffi_func_ptr)
 	addr_diff = (void*)do_pseudo - (void*)(exec_page
 			+ INS_SIZE * func_number + i + LENGTH_OF_JMP_INSTRUCTION);
 	ins[i++] = 0xe9;	// x86/x64 jmp instruction
-	ins[i++] = (char)(((signed long)addr_diff      ) & 0xff);
-	ins[i++] = (char)(((signed long)addr_diff >>  8) & 0xff);
-	ins[i++] = (char)(((signed long)addr_diff >> 16) & 0xff);
-	ins[i++] = (char)(((signed long)addr_diff >> 24) & 0xff);
-
+	ins[i++] = (char)(((signed long) addr_diff      ) & 0xff);
+	ins[i++] = (char)(((signed long) addr_diff >>  8) & 0xff);
+	ins[i++] = (char)(((signed long) addr_diff >> 16) & 0xff);
+	ins[i++] = (char)(((signed long) addr_diff >> 24) & 0xff);
+//printf("##%d\n",i);
 	/* fill as 'NOP' instruction */
 	for ( ; i < INS_SIZE; i++)
 		ins[i] = 0x90;
@@ -232,6 +252,7 @@ do_resist_func(int nargs)
 	ffi_type **arg_types;
 	void **arg_values;
 	ffi_type *func_type;
+	struct ffi_func_t *ffi_func;
 
 	lib = (NODE *) get_scalar_argument(0, FALSE);
 	force_string(lib);
@@ -247,8 +268,7 @@ do_resist_func(int nargs)
 
 	dl = lookup_shlib(lib->stptr);
 
-	func = dlsym(dl, fun->stptr);
-	if (func == NULL) {
+	if ((func = dlsym(dl, fun->stptr)) == NULL) {
 		msg(_(
 		    "fatal: extension: library `%s': cannot call function `%s' (%s)\n"),
 				"obj->stptr", fun->stptr, dlerror());
@@ -330,19 +350,19 @@ do_resist_func(int nargs)
 
         if ((status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
 				arg_num, func_type, arg_types)) != FFI_OK) {
-                // Handle the ffi_status error.
+                // Handle the ffi_status error. TODO
         }
 
-	ffi_func_args[func_number] = malloc(sizeof(struct ffi_func_t));
+	ffi_func = malloc(sizeof(struct ffi_func_t));
 
-	ffi_func_args[func_number]->func_ptr = func;
-	ffi_func_args[func_number]->cif = cif;
-	ffi_func_args[func_number]->func_type = func_type;
-	ffi_func_args[func_number]->arg_num = arg_num;
-	ffi_func_args[func_number]->arg_types = arg_types;
-	ffi_func_args[func_number]->arg_values = arg_values;
+	ffi_func->func_ptr = func;
+	ffi_func->cif = cif;
+	ffi_func->func_type = func_type;
+	ffi_func->arg_num = arg_num;
+	ffi_func->arg_types = arg_types;
+	ffi_func->arg_values = arg_values;
 
-	set_trampoline(ffi_func_args[func_number]);
+	set_trampoline(ffi_func);
 
 	make_builtin(fun->stptr,
 			(NODE*(*)(int))(exec_page + func_number * INS_SIZE), arg_num);
@@ -380,7 +400,7 @@ do_load_shlib(int nargs)
 
 	shlib_number++;
 
-	return make_number((AWKNUM) (unsigned int)dl);
+	return make_number((AWKNUM) (unsigned int) dl);
 }
 
 static NODE *
@@ -396,13 +416,13 @@ do_close_shlib(int nargs)
 	dl = lookup_shlib(lib->stptr);
 
 	if ((ret = dlclose(dl)) != 0) {
-//		/* fatal needs `obj', and we need to deallocate it! */
+		/* fatal needs `obj', and we need to deallocate it! */
 		msg(_("fatal: extension: cannot close `%s' (%s)\n"),
 			lib->stptr, dlerror());
 		gawk_exit(EXIT_FATAL);
 	}
 
-	return make_number((AWKNUM) 0);
+	return make_number((AWKNUM) ret);
 }
 
 NODE *
