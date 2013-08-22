@@ -19,14 +19,6 @@
 #endif
 
 
-static NODE *do_pseudo(int nargs);
-static void set_trampoline();
-static void *lookup_shlib(const char *name);
-static NODE *do_resist_func(int nargs);
-static NODE *do_load_shlib(int nargs);
-NODE *dlload(NODE *tree, void *dl);
-
-
 int plugin_is_GPL_compatible;
 
 
@@ -41,7 +33,7 @@ struct shlib_t {
 static struct shlib_t shlib[16];
 
 	
-struct ffi_func_args_t {
+struct ffi_func_t {
 	ffi_cif cif;
 	void *func_ptr;
 	ffi_type *func_type;
@@ -50,7 +42,7 @@ struct ffi_func_args_t {
 	void **arg_values;
 };
 
-static struct ffi_func_args_t ffi_func_args[512];
+static struct ffi_func_t *ffi_func_args[512];
 
 
 static void *exec_page;
@@ -59,6 +51,15 @@ static unsigned int shlib_number;
 
 static unsigned int func_number;
 static unsigned int call_func_number;
+
+
+static NODE *do_pseudo(int nargs);
+static void set_trampoline(struct ffi_func_t *);
+static void *lookup_shlib(const char *name);
+static NODE *do_resist_func(int nargs);
+static NODE *do_load_shlib(int nargs);
+NODE *dlload(NODE *tree, void *dl);
+
 
 static NODE *
 do_pseudo(int nargs)
@@ -72,66 +73,68 @@ do_pseudo(int nargs)
 	};
 
 	unsigned int fnum;
+	struct ffi_func_t *ffi_func;
 	void **arg_values;
 	union func_result result;
 	int i;
 	
 	fnum = call_func_number;
-	arg_values = ffi_func_args[fnum].arg_values;
+	ffi_func = ffi_func_args[fnum];
+	arg_values = ffi_func->arg_values;
 
 	// printf("%016lx\n", fnum);
 
-	for (i = 0; i < ffi_func_args[fnum].arg_num; i++) {
+	for (i = 0; i < ffi_func->arg_num; i++) {
 		NODE *arg = (NODE *) get_scalar_argument(i, FALSE);
 
-		if (ffi_func_args[fnum].arg_types[i] == &ffi_type_void) {
-		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_sint) {
-			*(int *)ffi_func_args[fnum].arg_values[i] =
+		if (ffi_func->arg_types[i] == &ffi_type_void) {
+		} else if (ffi_func->arg_types[i] == &ffi_type_sint) {
+			*(int *)ffi_func->arg_values[i] =
 					(int) force_number(arg);
-		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_uint) {
-			*(unsigned int *)ffi_func_args[fnum].arg_values[i] =
+		} else if (ffi_func->arg_types[i] == &ffi_type_uint) {
+			*(unsigned int *)ffi_func->arg_values[i] =
 					(unsigned int) force_number(arg);
-		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_float) {
-			*(float *)ffi_func_args[fnum].arg_values[i] =
+		} else if (ffi_func->arg_types[i] == &ffi_type_float) {
+			*(float *)ffi_func->arg_values[i] =
 					(float) force_number(arg);
-		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_double) {
-			*(double *)ffi_func_args[fnum].arg_values[i] =
+		} else if (ffi_func->arg_types[i] == &ffi_type_double) {
+			*(double *)ffi_func->arg_values[i] =
 					(double) force_number(arg);
-		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_pointer) {
+		} else if (ffi_func->arg_types[i] == &ffi_type_pointer) {
 			force_string(arg);
-			*(char **)ffi_func_args[fnum].arg_values[i] =
+			*(char **)ffi_func->arg_values[i] =
 					(void *) arg->stptr;
-	//	} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_pointer) {
-	//		*(void **)ffi_func_args[fnum].arg_values[i] =
+	//	} else if (ffi_func->arg_types[i] == &ffi_type_pointer) {
+	//		*(void **)ffi_func->arg_values[i] =
 	//				(void *) (unsigned int) force_number(arg);
                 }
 	}
 
 	// Invoke the function.
-	ffi_call(&ffi_func_args[fnum].cif, FFI_FN(ffi_func_args[fnum].func_ptr),
-		&result, arg_values);
+	ffi_call(&ffi_func->cif, FFI_FN(ffi_func->func_ptr),
+		&result, ffi_func->arg_values);
 
-	if (ffi_func_args[fnum].func_type == &ffi_type_void) {
+	if (ffi_func->func_type == &ffi_type_void) {
 		return Nnull_string;
-	} else if (ffi_func_args[fnum].func_type == &ffi_type_sint) {
+	} else if (ffi_func->func_type == &ffi_type_sint) {
 		return make_number((AWKNUM) result.sint);
-	} else if (ffi_func_args[fnum].func_type == &ffi_type_uint) {
+	} else if (ffi_func->func_type == &ffi_type_uint) {
 		return make_number((AWKNUM) result.uint);
-	} else if (ffi_func_args[fnum].func_type == &ffi_type_float) {
+	} else if (ffi_func->func_type == &ffi_type_float) {
 		return make_number((AWKNUM) result.flt);
-	} else if (ffi_func_args[fnum].func_type == &ffi_type_double) {
+	} else if (ffi_func->func_type == &ffi_type_double) {
 		return make_number((AWKNUM) result.dbl);
-	} else if (ffi_func_args[fnum].func_type == &ffi_type_pointer) {
+	} else if (ffi_func->func_type == &ffi_type_pointer) {
 		return make_number((AWKNUM) (unsigned int)result.ptr);
-	//} else if (ffi_func_args[fnum].func_type == &ffi_type_pointer) {
+	//} else if (ffi_func->func_type == &ffi_type_pointer) {
 	//	return make_number((AWKNUM) (unsigned int)result.ptr);
 	}
 
-	return make_number((AWKNUM) 0);
+	return Nnull_string;
 }
 
 static void
-set_trampoline()
+set_trampoline(struct ffi_func_t *ffi_func_ptr)
 {
 	char ins[INS_SIZE];
 	signed int addr_diff;
@@ -326,22 +329,23 @@ do_resist_func(int nargs)
 	}
 
         if ((status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
-				arg_num, func_type, arg_types)) != FFI_OK)
-        {
+				arg_num, func_type, arg_types)) != FFI_OK) {
                 // Handle the ffi_status error.
         }
 
-	set_trampoline();
+	ffi_func_args[func_number] = malloc(sizeof(struct ffi_func_t));
+
+	ffi_func_args[func_number]->func_ptr = func;
+	ffi_func_args[func_number]->cif = cif;
+	ffi_func_args[func_number]->func_type = func_type;
+	ffi_func_args[func_number]->arg_num = arg_num;
+	ffi_func_args[func_number]->arg_types = arg_types;
+	ffi_func_args[func_number]->arg_values = arg_values;
+
+	set_trampoline(ffi_func_args[func_number]);
 
 	make_builtin(fun->stptr,
 			(NODE*(*)(int))(exec_page + func_number * INS_SIZE), arg_num);
-
-	ffi_func_args[func_number].func_ptr = func;
-	ffi_func_args[func_number].cif = cif;
-	ffi_func_args[func_number].func_type = func_type;
-	ffi_func_args[func_number].arg_num = arg_num;
-	ffi_func_args[func_number].arg_types = arg_types;
-	ffi_func_args[func_number].arg_values = arg_values;
 
 	func_number++;
 
