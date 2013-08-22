@@ -1,3 +1,4 @@
+#!/usr/local/bin/gawk-4.0.1 -f
 BEGIN {
 	extension("./cawk.so", "dlload")
 
@@ -5,22 +6,27 @@ BEGIN {
 	load_shlib("libm.so")
 	load_shlib("libc.so.6")
 
-	c_func_resist("hello.so", "hello", "v")
-	c_func_resist("hello.so", "square", "d", "d")
-	c_func_resist("hello.so", "square", "i", "di")
-	c_func_resist("libm.so", "abs", "i", "i")
-	c_func_resist("libm.so", "fabs", "d", "d")
-	c_func_resist("libc.so.6", "malloc", "i", "i")
-	c_func_resist("libc.so.6", "random", "i")
+	resist_func("./hello.so",  "hello",  "v", "v")
+	resist_func("./hello.so",  "hello2", "v", "$")
+	resist_func("./hello.so",  "square", "d", "d")
+	resist_func("./hello.so",  "square", "i", "di")
+	resist_func("libm.so",   "abs",    "i", "i")
+	resist_func("libm.so",   "fabs",   "d", "d")
+	resist_func("libc.so.6", "malloc", "i", "i")
+	resist_func("libc.so.6", "random", "i", "v")
 
 	hello()
+	hello2("AWK")
 	print square(-3)
-	print cut_p_disit(3.141593, 3)
+	#print cut_p_disit(3.141593, 3)
 	print abs(-89)
 	print fabs(-3.14)
 	printf "%x\n", malloc(8)
 	print random()
 	foo()
+
+	close_shlib("./hello.so")
+	#hello()
 }
 
 function foo()

@@ -12,20 +12,35 @@
 
 #include "awk.h"
 
+
 #if ARCH_X86
 	#define INS_SIZE 16
 #elif ARCH_X64
 	#define INS_SIZE 32
 #endif
 
+
+static NODE *do_pseudo(int nargs);
+static void set_trampoline();
+static void *lookup_shlib(const char *name);
+static NODE *do_resist_func(int nargs);
+static NODE *do_load_shlib(int nargs);
+NODE *dlload(NODE *tree, void *dl);
+
+
 int plugin_is_GPL_compatible;
 
+
+int pagesize;
+
+
 struct shlib_t {
-	char lib_name[64];
+	char *lib_name;
 	void *lib_ptr;
 };
 
 struct shlib_t shlib[16];
+
 	
 struct ffi_func_args_t {
 	ffi_cif cif;
@@ -54,20 +69,22 @@ union func_result {
 	void *ptr;
 };
 
-static NODE*
-do_tmp(int nargs)
+static NODE *
+do_pseudo(int nargs)
 {
-	unsigned int fnum = call_func_number;
-	void **arg_values = ffi_func_args[fnum].arg_values;
+	unsigned int fnum;
+	void **arg_values;
 	union func_result result;
 	int i;
 	
+	fnum = call_func_number;
+	arg_values = ffi_func_args[fnum].arg_values;
+
 	// printf("%016lx\n", fnum);
 
 	for (i = 0; i < ffi_func_args[fnum].arg_num; i++) {
 		NODE *arg = (NODE *) get_scalar_argument(i, FALSE);
 
-#if 1
 		if (ffi_func_args[fnum].arg_types[i] == &ffi_type_void) {
 		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_sint) {
 			*(int *)ffi_func_args[fnum].arg_values[i] =
@@ -82,37 +99,17 @@ do_tmp(int nargs)
 			*(double *)ffi_func_args[fnum].arg_values[i] =
 					(double) force_number(arg);
 		} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_pointer) {
-			*(void **)ffi_func_args[fnum].arg_values[i] =
-					(void *) (unsigned int) force_number(arg);
+			force_string(arg);
+			*(char **)ffi_func_args[fnum].arg_values[i] =
+					(void *) arg->stptr;
+	//	} else if (ffi_func_args[fnum].arg_types[i] == &ffi_type_pointer) {
+	//		*(void **)ffi_func_args[fnum].arg_values[i] =
+	//				(void *) (unsigned int) force_number(arg);
                 }
-#else
-		switch (ffi_func_args[fnum].arg_types[i]) {
-		case &ffi_type_void:
-			break;
-		case &ffi_type_sint:
-			*arg_values[i] = (int) force_number(arg);
-			break;
-		case &ffi_type_uint:
-			*arg_values[i] = (unsigned int) force_number(arg);
-			break;
-		case &ffi_type_float:
-			*arg_values[i] = (float) force_number(arg);
-			break;
-		case &ffi_type_double:
-			*arg_values[i] = (double) force_number(arg);
-			break;
-		case &ffi_type_pointer:
-			*arg_values[i] = (void *) force_number(arg);
-			break;
-		default:
-			break;
-		}
-#endif
 	}
 
 	// Invoke the function.
-	ffi_call(&ffi_func_args[fnum].cif,
-		FFI_FN(ffi_func_args[fnum].func_ptr),
+	ffi_call(&ffi_func_args[fnum].cif, FFI_FN(ffi_func_args[fnum].func_ptr),
 		&result, arg_values);
 
 	if (ffi_func_args[fnum].func_type == &ffi_type_void) {
@@ -127,16 +124,21 @@ do_tmp(int nargs)
 		return make_number((AWKNUM) result.dbl);
 	} else if (ffi_func_args[fnum].func_type == &ffi_type_pointer) {
 		return make_number((AWKNUM) (unsigned int)result.ptr);
+	//} else if (ffi_func_args[fnum].func_type == &ffi_type_pointer) {
+	//	return make_number((AWKNUM) (unsigned int)result.ptr);
 	}
 
 	return make_number((AWKNUM) 0);
 }
 
-void fff()
+static void
+set_trampoline()
 {
 	char ins[INS_SIZE];
 	signed int addr_diff;
-	int i = 0;
+	int i;
+
+	i = 0;
 
 #if ARCH_X86 || ARCH_X64
 	// mov imm to func_number
@@ -164,11 +166,11 @@ void fff()
 	ins[i++] = (char)(((unsigned int)func_number >> 16) & 0xff);
 	ins[i++] = (char)(((unsigned int)func_number >> 24) & 0xff);
 
-	// jmp to do_tmp
+	// jmp to do_pseudo
 	// x86/x64 jmp instruction
 	//	E9 cd JMP rel32
 	#define LENGTH_OF_JMP_INSTRUCTION	5
-	addr_diff = (void*)do_tmp - (void*)(exec_page
+	addr_diff = (void*)do_pseudo - (void*)(exec_page
 			+ INS_SIZE * func_number + i + LENGTH_OF_JMP_INSTRUCTION);
 	ins[i++] = 0xe9;	// x86/x64 jmp instruction
 	ins[i++] = (char)(((signed long)addr_diff      ) & 0xff);
@@ -176,10 +178,9 @@ void fff()
 	ins[i++] = (char)(((signed long)addr_diff >> 16) & 0xff);
 	ins[i++] = (char)(((signed long)addr_diff >> 24) & 0xff);
 
-	// fill by NOP instruction
-	for ( ; i < INS_SIZE; i++) {
+	/* fill as 'NOP' instruction */
+	for ( ; i < INS_SIZE; i++)
 		ins[i] = 0x90;
-	}
 #endif
 
 	memcpy(exec_page + func_number * INS_SIZE, ins, INS_SIZE);
@@ -193,7 +194,7 @@ void fff()
 			*((unsigned char*)exec_page+3),
 			*((unsigned char*)exec_page+4),
 			&func_number,
-			// do_tmp,
+			// do_pseudo,
 			exec_page,
 			dlload,
 			addr_diff
@@ -201,19 +202,20 @@ void fff()
 #endif
 }
 
-static void*
+static void *
 lookup_shlib(const char *name)
 {
 	int i;
 
-	for (i = 0; i < 16; i++)
+	for (i = 0; i < shlib_number; i++)
 		if (!strcmp(name, shlib[i].lib_name))
 			return shlib[i].lib_ptr;
+
 	return NULL;
 }
 
-static NODE*
-do_c_func_resist(int nargs)
+static NODE *
+do_resist_func(int nargs)
 {
 	ffi_status status;
 	NODE *lib;
@@ -269,11 +271,14 @@ do_c_func_resist(int nargs)
 	case 'd':
 		func_type = &ffi_type_double;
 		break;
+	case '$':
+		func_type = &ffi_type_pointer;
+		break;
 	case 'p':
 		func_type = &ffi_type_pointer;
 		break;
 	default:
-		func_type = NULL; // surppress warning
+		func_type = NULL; /* surppress warning */
 		break;
 	}
 
@@ -288,6 +293,8 @@ do_c_func_resist(int nargs)
 		case 'v':
 			arg_types[i] = &ffi_type_void;
 			arg_values[i] = NULL;
+			if (arg_num != 1) /* Error TODO */;
+			arg_num = 0;
 			break;
 		case 'i':
 		case 's':
@@ -306,6 +313,10 @@ do_c_func_resist(int nargs)
 			arg_types[i] = &ffi_type_double;
 			arg_values[i] = malloc(sizeof(double));
 			break;
+		case '$':
+			arg_types[i] = &ffi_type_pointer;
+			arg_values[i] = malloc(sizeof(void *));
+			break;
 		case 'p':
 			arg_types[i] = &ffi_type_pointer;
 			arg_values[i] = malloc(sizeof(void *));
@@ -321,7 +332,7 @@ do_c_func_resist(int nargs)
                 // Handle the ffi_status error.
         }
 
-	fff();
+	set_trampoline();
 
 	make_builtin(fun->stptr,
 			(NODE*(*)(int))(exec_page + func_number * INS_SIZE), arg_num);
@@ -343,11 +354,12 @@ do_load_shlib(int nargs)
 {
 	NODE *obj;
 	void *dl;
-	int flags = RTLD_LAZY;
+	int flags;
 
 	obj = (NODE *) get_scalar_argument(0, FALSE);
 	force_string(obj);
 
+	flags = RTLD_LAZY;
 #ifdef RTLD_GLOBAL
 	flags |= RTLD_GLOBAL;
 #endif
@@ -358,10 +370,34 @@ do_load_shlib(int nargs)
 		gawk_exit(EXIT_FATAL);
 	}
 
-	strcpy(shlib[shlib_number].lib_name, obj->stptr);
+	emalloc(shlib[shlib_number].lib_name, char *, obj->stlen + 1, "load_shlib");
+	strncpy(shlib[shlib_number].lib_name, obj->stptr, obj->stlen + 1);
+
 	shlib[shlib_number].lib_ptr = dl;
 
 	shlib_number++;
+
+	return make_number((AWKNUM) (unsigned int)dl);
+}
+
+static NODE *
+do_close_shlib(int nargs)
+{
+	NODE *lib;
+	void *dl;
+	int ret;
+
+	lib = (NODE *) get_scalar_argument(0, FALSE);
+	force_string(lib);
+
+	dl = lookup_shlib(lib->stptr);
+
+	if ((ret = dlclose(dl)) != 0) {
+//		/* fatal needs `obj', and we need to deallocate it! */
+		msg(_("fatal: extension: cannot close `%s' (%s)\n"),
+			lib->stptr, dlerror());
+		gawk_exit(EXIT_FATAL);
+	}
 
 	return make_number((AWKNUM) 0);
 }
@@ -370,20 +406,16 @@ NODE *
 dlload(NODE *tree, void *dl)
 {
 	make_builtin("load_shlib", do_load_shlib, 1);
-	make_builtin("c_func_resist", do_c_func_resist, 3);
-	// make_builtin("c_call", do_c_call, 32);
-	// make_builtin("c_call_type", do_c_call_type, 33);
+	make_builtin("close_shlib", do_close_shlib, 1);
+	make_builtin("resist_func", do_resist_func, 4);
 
-	int pagesize;
 	pagesize = sysconf(_SC_PAGE_SIZE);
-	// printf("%d\n",pagesize);
-
 	exec_page = mmap(NULL, pagesize * 1, PROT_WRITE | PROT_EXEC,
-				MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	// munmap
+			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
 	shlib_number = 0;
 	func_number = 0;
 
 	return make_number((AWKNUM) 0);
 }
+
