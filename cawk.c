@@ -9,8 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "awk.h"
-
+#include "gawkapi.h"
 
 #if ARCH_X86
 	#define INS_SIZE 16
@@ -18,12 +17,19 @@
 	#define INS_SIZE 32
 #endif
 
+static const gawk_api_t *api;	/* for convenience macros to work */
+static awk_ext_id_t *ext_id;
+static const char *ext_version = "cawk: version 0.1";
+static awk_bool_t (*init_func)(void) = init_cawk;
 
 int plugin_is_GPL_compatible;
 
+#define cawk_get_argument(count, wanted, result)	\
+	if (!get_argument(count, wanted, result)) {\
+		\
+	}
 
 static int pagesize;
-
 
 struct shlib_t {
 	char *lib_name;
@@ -32,7 +38,6 @@ struct shlib_t {
 
 static struct shlib_t shlib[16];
 
-	
 struct ffi_func_t {
 	ffi_cif cif;
 	void *func_ptr;
@@ -44,7 +49,6 @@ struct ffi_func_t {
 
 //static struct ffi_func_t *ffi_func_args[512];
 
-
 static void *exec_page;
 
 static unsigned int shlib_number;
@@ -52,86 +56,73 @@ static unsigned int shlib_number;
 static unsigned int func_number;
 static struct ffi_func_t *call_ffi_func;
 
-
 static NODE *do_pseudo(int nargs);
 static void set_trampoline(struct ffi_func_t *);
 static void *lookup_shlib(const char *name);
 static NODE *do_resist_func(int nargs);
 static NODE *do_load_shlib(int nargs);
+static NODE *do_close_shlib(int nargs)
 NODE *dlload(NODE *tree, void *dl);
 
-
-static NODE *
-do_pseudo(int nargs)
+static awk_value_t *
+do_load_shlib(int nargs, awk_value_t *result)
 {
-	union func_result {
-		ffi_sarg sint;
-		ffi_arg uint;
-		float flt;
-		double dbl;
-		void *ptr;
-	};
+	awk_value_t obj;
+	void *dl;
+	int flags;
 
-	//unsigned int fnum;
-	struct ffi_func_t *ffi_func;
-	//void **arg_values;
-	union func_result result;
-	int i;
-	
-	//fnum = call_ffi_func;
-	//ffi_func = ffi_func_args[fnum];
-	ffi_func = call_ffi_func;
-	//arg_values = ffi_func->arg_values;
+	if (do_lint && nargs != 1)
+		lintwarn(ext_id, _("load_shlib: called with incorrect number of arguments, expecting 1"));
 
-	// printf("%016lx\n", fnum);
-
-	for (i = 0; i < ffi_func->arg_num; i++) {
-		NODE *arg = (NODE *) get_scalar_argument(i, FALSE);
-
-		if (ffi_func->arg_types[i] == &ffi_type_void) {
-		} else if (ffi_func->arg_types[i] == &ffi_type_sint) {
-			*(int *)ffi_func->arg_values[i] =
-					(int) force_number(arg);
-		} else if (ffi_func->arg_types[i] == &ffi_type_uint) {
-			*(unsigned int *)ffi_func->arg_values[i] =
-					(unsigned int) force_number(arg);
-		} else if (ffi_func->arg_types[i] == &ffi_type_float) {
-			*(float *)ffi_func->arg_values[i] =
-					(float) force_number(arg);
-		} else if (ffi_func->arg_types[i] == &ffi_type_double) {
-			*(double *)ffi_func->arg_values[i] =
-					(double) force_number(arg);
-		} else if (ffi_func->arg_types[i] == &ffi_type_pointer) {
-			force_string(arg);
-			*(char **)ffi_func->arg_values[i] =
-					(void *) arg->stptr;
-	//	} else if (ffi_func->arg_types[i] == &ffi_type_pointer) {
-	//		*(void **)ffi_func->arg_values[i] =
-	//				(void *) (unsigned int) force_number(arg);
-                }
+	if (!get_argument(0, AWK_STRING, &obj)) {
+		// TODO
 	}
 
-	// Invoke the function.
-	ffi_call(&ffi_func->cif, FFI_FN(ffi_func->func_ptr),
-		&result, ffi_func->arg_values);
-
-	if (ffi_func->func_type == &ffi_type_void) {
-		return Nnull_string;
-	} else if (ffi_func->func_type == &ffi_type_sint) {
-		return make_number((AWKNUM) result.sint);
-	} else if (ffi_func->func_type == &ffi_type_uint) {
-		return make_number((AWKNUM) result.uint);
-	} else if (ffi_func->func_type == &ffi_type_float) {
-		return make_number((AWKNUM) result.flt);
-	} else if (ffi_func->func_type == &ffi_type_double) {
-		return make_number((AWKNUM) result.dbl);
-	} else if (ffi_func->func_type == &ffi_type_pointer) {
-		return make_number((AWKNUM) (unsigned int)result.ptr);
-	//} else if (ffi_func->func_type == &ffi_type_pointer) {
-	//	return make_number((AWKNUM) (unsigned int)result.ptr);
+	flags = RTLD_LAZY;
+#ifdef RTLD_GLOBAL
+	flags |= RTLD_GLOBAL;
+#endif
+	if ((dl = dlopen(obj.str_value.str, flags)) == NULL) {
+		/* fatal needs `obj', and we need to deallocate it! */
+		msg(_("fatal: extension: cannot open `%s' (%s)\n"),
+			obj.str_value.str, dlerror());
+		gawk_exit(EXIT_FATAL);
 	}
 
-	return Nnull_string;
+	emalloc(shlib[shlib_number].lib_name, char *, obj.str_value.len + 1, "load_shlib");
+	strncpy(shlib[shlib_number].lib_name, obj.str_value.str, obj.str_value.len + 1);
+
+	shlib[shlib_number].lib_ptr = dl;
+
+	shlib_number++;
+
+	return make_number((AWKNUM) (unsigned int) dl, result);
+}
+
+static awk_value_t *
+do_close_shlib(int nargs, awk_value_t *result)
+{
+	awk_value_t lib;
+	void *dl;
+	int ret;
+
+	if (do_lint && nargs != 1)
+		lintwarn(ext_id, _("close_shlib: called with incorrect number of arguments, expecting 1"));
+
+	if (!get_argument(0, AWK_STRING, &lib)) {
+		// TODO
+	}
+
+	dl = lookup_shlib(lib.str_value.str);
+
+	if ((ret = dlclose(dl)) != 0) {
+		/* fatal needs `obj', and we need to deallocate it! */
+		msg(_("fatal: extension: cannot close `%s' (%s)\n"),
+			lib.str_value.str, dlerror());
+		gawk_exit(EXIT_FATAL);
+	}
+
+	return make_number((AWKNUM) ret, result);
 }
 
 static void
@@ -236,14 +227,14 @@ lookup_shlib(const char *name)
 	return NULL;
 }
 
-static NODE *
-do_resist_func(int nargs)
+static awk_value_t *
+do_resist_func(int nargs, awk_value_t *result)
 {
 	ffi_status status;
-	NODE *lib;
-	NODE *fun;
-	NODE *ret;
-	NODE *arg;
+	awk_value_t lib;
+	awk_value_t fun;
+	awk_value_t ret;
+	awk_value_t arg;
 	int i;
 	void *dl;
 	void *func;
@@ -253,30 +244,38 @@ do_resist_func(int nargs)
 	void **arg_values;
 	ffi_type *func_type;
 	struct ffi_func_t *ffi_func;
+	awk_ext_func_t ext_func;
 
-	lib = (NODE *) get_scalar_argument(0, FALSE);
-	force_string(lib);
+	if (do_lint && nargs != 1)
+		lintwarn(ext_id, _("resit_func: called with incorrect number of arguments, expecting 4"));
 
-	fun = (NODE *) get_scalar_argument(1, FALSE);
-	force_string(fun);
+	if (!get_argument(0, AWK_STRING, &lib)) {
+		// TODO
+	}
 
-	ret = (NODE *) get_scalar_argument(2, FALSE);
-	force_string(ret);
+	if (!get_argument(1, AWK_STRING, &fun)) {
+		// TODO
+	}
 
-	arg = (NODE *) get_scalar_argument(3, FALSE);
-	force_string(arg);
+	if (!get_argument(2, AWK_STRING, &ret)) {
+		// TODO
+	}
 
-	dl = lookup_shlib(lib->stptr);
+	if (!get_argument(3, AWK_STRING, &arg)) {
+		// TODO
+	}
 
-	if ((func = dlsym(dl, fun->stptr)) == NULL) {
+	dl = lookup_shlib(lib.str_value.str);
+
+	if ((func = dlsym(dl, fun.str_value.str)) == NULL) {
 		msg(_(
 		    "fatal: extension: library `%s': cannot call function `%s' (%s)\n"),
-				"obj->stptr", fun->stptr, dlerror());
+				"obj->stptr", fun.str_value.str, dlerror());
 		gawk_exit(EXIT_FATAL);
 		return NULL; /* surppress warning */
 	}
 
-	switch (ret->stptr[0]) {
+	switch (ret.str_value.str[0]) {
 	case 'v':
 		func_type = &ffi_type_void;
 		break;
@@ -304,14 +303,14 @@ do_resist_func(int nargs)
 		break;
 	}
 
-	arg_num = strlen(arg->stptr);
+	arg_num = strlen(arg.str_value.str);
 
 	emalloc(arg_types, ffi_type **, arg_num * sizeof(ffi_type *), "resist_func");
 	emalloc(arg_values, void **, arg_num * sizeof(void *), "resist_func");
 
 	for (i = 0; i < arg_num; i++) {
-		//printf ("%c\n",arg->stptr[i + 1]);
-		switch (arg->stptr[i]) {
+		//printf ("%c\n",arg.str_value.str[i + 1]);
+		switch (arg.str_value.str[i]) {
 		case 'v':
 			arg_types[i] = &ffi_type_void;
 			arg_values[i] = NULL;
@@ -364,81 +363,117 @@ do_resist_func(int nargs)
 
 	set_trampoline(ffi_func);
 
-	make_builtin(fun->stptr,
-			(NODE*(*)(int))(exec_page + func_number * INS_SIZE), arg_num);
+	ext_func.name = fun.str_value.str;
+	ext_func.function = (awk_value_t *(*)(int, awk_value_t)) (exec_page + func_number * INS_SIZE);
+	ext_func.num_expected_args = arg_num;
+	add_ext_func(NULL, ext_func);
 
 	func_number++;
 
-	return make_number((AWKNUM) 0);
+	return make_number((AWKNUM) 0, result);
 }
 
-static NODE *
-do_load_shlib(int nargs)
+static awk_value_t *
+do_pseudo(int nargs, awk_value_t *result)
 {
-	NODE *obj;
-	void *dl;
-	int flags;
+	union func_result {
+		ffi_sarg sint;
+		ffi_arg uint;
+		float flt;
+		double dbl;
+		void *ptr;
+	};
 
-	obj = (NODE *) get_scalar_argument(0, FALSE);
-	force_string(obj);
+	//unsigned int fnum;
+	struct ffi_func_t *ffi_func;
+	//void **arg_values;
+	union func_result result;
+	int i;
+	
+	//fnum = call_ffi_func;
+	//ffi_func = ffi_func_args[fnum];
+	ffi_func = call_ffi_func;
+	//arg_values = ffi_func->arg_values;
 
-	flags = RTLD_LAZY;
-#ifdef RTLD_GLOBAL
-	flags |= RTLD_GLOBAL;
+	// printf("%016lx\n", fnum);
+
+	for (i = 0; i < ffi_func->arg_num; i++) {
+		awk_value_t arg;
+
+		if (ffi_func->arg_types[i] == &ffi_type_void) {
+		} else if (ffi_func->arg_types[i] == &ffi_type_sint) {
+			cawk_get_argument(i, AWK_NUMBER, arg);
+			*(int *) ffi_func->arg_values[i] =
+					(int) arg.num_value;
+		} else if (ffi_func->arg_types[i] == &ffi_type_uint) {
+			cawk_get_argument(i, AWK_NUMBER, arg);
+			*(unsigned int *) ffi_func->arg_values[i] =
+					(unsigned int) arg.num_value;
+		} else if (ffi_func->arg_types[i] == &ffi_type_float) {
+			cawk_get_argument(i, AWK_NUMBER, arg);
+			*(float *) ffi_func->arg_values[i] =
+					(float) arg.num_value;
+		} else if (ffi_func->arg_types[i] == &ffi_type_double) {
+			cawk_get_argument(i, AWK_NUMBER, arg);
+			*(double *) ffi_func->arg_values[i] =
+					(double) arg.num_value;
+		} else if (ffi_func->arg_types[i] == &ffi_type_pointer) {
+			cawk_get_argument(i, AWK_STRING, arg);
+			*(char **)ffi_func->arg_values[i] =
+					(void *) arg.str_value.str;
+#if 0
+		} else if (ffi_func->arg_types[i] == &ffi_type_pointer) {
+			cawk_get_argument(i, AWK_NUMBER, arg);
+			*(void **)ffi_func->arg_values[i] =
+					(void *) (unsigned int) arg.num_value;
 #endif
-	if ((dl = dlopen(obj->stptr, flags)) == NULL) {
-		/* fatal needs `obj', and we need to deallocate it! */
-		msg(_("fatal: extension: cannot open `%s' (%s)\n"),
-			obj->stptr, dlerror());
-		gawk_exit(EXIT_FATAL);
+                }
 	}
 
-	emalloc(shlib[shlib_number].lib_name, char *, obj->stlen + 1, "load_shlib");
-	strncpy(shlib[shlib_number].lib_name, obj->stptr, obj->stlen + 1);
+	// Invoke the function.
+	ffi_call(&ffi_func->cif, FFI_FN(ffi_func->func_ptr),
+		&result, ffi_func->arg_values);
 
-	shlib[shlib_number].lib_ptr = dl;
-
-	shlib_number++;
-
-	return make_number((AWKNUM) (unsigned int) dl);
-}
-
-static NODE *
-do_close_shlib(int nargs)
-{
-	NODE *lib;
-	void *dl;
-	int ret;
-
-	lib = (NODE *) get_scalar_argument(0, FALSE);
-	force_string(lib);
-
-	dl = lookup_shlib(lib->stptr);
-
-	if ((ret = dlclose(dl)) != 0) {
-		/* fatal needs `obj', and we need to deallocate it! */
-		msg(_("fatal: extension: cannot close `%s' (%s)\n"),
-			lib->stptr, dlerror());
-		gawk_exit(EXIT_FATAL);
+	if (ffi_func->func_type == &ffi_type_void) {
+		make_null_string(result);
+		return result;
+	} else if (ffi_func->func_type == &ffi_type_sint) {
+		return make_number((AWKNUM) result.sint, result);
+	} else if (ffi_func->func_type == &ffi_type_uint) {
+		return make_number((AWKNUM) result.uint, result);
+	} else if (ffi_func->func_type == &ffi_type_float) {
+		return make_number((AWKNUM) result.flt, result);
+	} else if (ffi_func->func_type == &ffi_type_double) {
+		return make_number((AWKNUM) result.dbl, result);
+	} else if (ffi_func->func_type == &ffi_type_pointer) {
+		return make_number((AWKNUM) (unsigned int) result.ptr, result);
+#if 0
+	} else if (ffi_func->func_type == &ffi_type_pointer) {
+		return make_number((AWKNUM) (unsigned int) result.ptr);
+#endif
 	}
 
-	return make_number((AWKNUM) ret);
+	make_null_string(result);
+	return result;
 }
 
-NODE *
-dlload(NODE *tree, void *dl)
+/* init_cawk --- initialization routine */
+static awk_bool_t
+init_cawk(void)
 {
-	make_builtin("load_shlib", do_load_shlib, 1);
-	make_builtin("close_shlib", do_close_shlib, 1);
-	make_builtin("resist_func", do_resist_func, 4);
-
 	pagesize = sysconf(_SC_PAGE_SIZE);
 	exec_page = mmap(NULL, pagesize * 1, PROT_WRITE | PROT_EXEC,
 			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
 	shlib_number = 0;
 	func_number = 0;
-
-	return make_number((AWKNUM) 0);
 }
 
+static awk_ext_func_t func_table[] = {
+	{ "load_shlib", do_load_shlib, 1 },
+	{ "close_shlib", do_close_shlib, 1 },
+	{ "resist_func", do_resist_func, 4 },
+};
+
+/* define the dl_load function using the boilerplate macro */
+dl_load_func(func_table, cawk, "")
