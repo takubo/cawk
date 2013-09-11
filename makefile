@@ -8,21 +8,25 @@ ifeq ($(uname_m), x86_64)
 	ARCH = ARCH_X64
 endif
 
+ifeq ($(uname_m), amd64)
+	ARCH = ARCH_X64
+endif
+
 CFLAGS = -Wall -fPIC -shared -g -c -O2 \
          -DDYNAMIC \
          -DHAVE_STRING_H -DHAVE_SNPRINTF -DHAVE_STDARG_H -DHAVE_VPRINTF \
-         -I${HOME}/gawk-4.0.1 -D${ARCH}
+         -I${HOME}/gawk-4.1.0 -D${ARCH}
 
 LDFLAGS = -shared
 
 all: cawk.so hello.so
-	~/gawk-4.0.1/gawk -f hello.awk
+	${HOME}/gawk-4.1.0/gawk -f hello.awk
 
 cawk.so: cawk.c makefile
-	gcc ${CFLAGS} cawk.c -o cawk.o
-	gcc ${LDFLAGS} cawk.o -lffi -o cawk.so
+	gcc cawk.c ${CFLAGS} -o cawk.o
+	gcc cawk.o ${LDFLAGS} -lffi -o cawk.so
 
 CFLAGS2 = -Wall -fPIC -shared -g -c -O2 
 hello.so: hello.c makefile
-	gcc ${CFLAGS2} hello.c -o hello.o
-	gcc ${LDFLAGS} hello.o -o hello.so
+	gcc hello.c ${CFLAGS2} -o hello.o
+	gcc hello.o ${LDFLAGS} -o hello.so

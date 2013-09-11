@@ -1,6 +1,9 @@
-#!/usr/local/bin/gawk-4.0.1 -f
+#!/usr/local/bin/gawk-4.1.0 -f
+
+@load "./cawk.so"
+
 BEGIN {
-	extension("./cawk.so", "dlload")
+	# extension("./cawk.so")
 
 	load_shlib("./hello.so")
 	load_shlib("libm.so")

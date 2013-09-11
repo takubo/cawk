@@ -1,26 +1,33 @@
-#include <sys/mman.h>
-
 #include <dlfcn.h>
 #include <ffi.h>
 
 #include <sys/types.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+//-------------
+#include <sys/stat.h>
+//-------------
+
 #include "gawkapi.h"
+
+#include "gettext.h"
+#define _(msgid)  gettext(msgid)
+#define N_(msgid) msgid
+
+//-------------
+#define AWKNUM	double
+//# define EXIT_FATAL   2
+//-------------
 
 #if ARCH_X86
 	#define INS_SIZE 16
 #elif ARCH_X64
 	#define INS_SIZE 32
 #endif
-
-static const gawk_api_t *api;	/* for convenience macros to work */
-static awk_ext_id_t *ext_id;
-static const char *ext_version = "cawk: version 0.1";
-static awk_bool_t (*init_func)(void) = init_cawk;
 
 int plugin_is_GPL_compatible;
 
@@ -56,13 +63,18 @@ static unsigned int shlib_number;
 static unsigned int func_number;
 static struct ffi_func_t *call_ffi_func;
 
-static NODE *do_pseudo(int nargs);
+static awk_value_t *do_pseudo(int nargs, awk_value_t *result);
 static void set_trampoline(struct ffi_func_t *);
 static void *lookup_shlib(const char *name);
-static NODE *do_resist_func(int nargs);
-static NODE *do_load_shlib(int nargs);
-static NODE *do_close_shlib(int nargs)
-NODE *dlload(NODE *tree, void *dl);
+static awk_value_t *do_resist_func(int nargs, awk_value_t *result);
+static awk_value_t *do_load_shlib(int nargs, awk_value_t *result);
+static awk_value_t *do_close_shlib(int nargs, awk_value_t *result);
+static awk_bool_t init_cawk(void);
+
+static const gawk_api_t *api;	/* for convenience macros to work */
+static awk_ext_id_t *ext_id;
+static const char *ext_version = "cawk: version 0.1";
+static awk_bool_t (*init_func)(void) = init_cawk;
 
 static awk_value_t *
 do_load_shlib(int nargs, awk_value_t *result)
@@ -84,9 +96,9 @@ do_load_shlib(int nargs, awk_value_t *result)
 #endif
 	if ((dl = dlopen(obj.str_value.str, flags)) == NULL) {
 		/* fatal needs `obj', and we need to deallocate it! */
-		msg(_("fatal: extension: cannot open `%s' (%s)\n"),
+		fatal(ext_id, _("fatal: extension: cannot open `%s' (%s)\n"),
 			obj.str_value.str, dlerror());
-		gawk_exit(EXIT_FATAL);
+		//gawk_exit(EXIT_FATAL);
 	}
 
 	emalloc(shlib[shlib_number].lib_name, char *, obj.str_value.len + 1, "load_shlib");
@@ -117,9 +129,9 @@ do_close_shlib(int nargs, awk_value_t *result)
 
 	if ((ret = dlclose(dl)) != 0) {
 		/* fatal needs `obj', and we need to deallocate it! */
-		msg(_("fatal: extension: cannot close `%s' (%s)\n"),
+		fatal(ext_id, _("fatal: extension: cannot close `%s' (%s)\n"),
 			lib.str_value.str, dlerror());
-		gawk_exit(EXIT_FATAL);
+		//gawk_exit(EXIT_FATAL);
 	}
 
 	return make_number((AWKNUM) ret, result);
@@ -268,10 +280,10 @@ do_resist_func(int nargs, awk_value_t *result)
 	dl = lookup_shlib(lib.str_value.str);
 
 	if ((func = dlsym(dl, fun.str_value.str)) == NULL) {
-		msg(_(
+		fatal(ext_id, _(
 		    "fatal: extension: library `%s': cannot call function `%s' (%s)\n"),
 				"obj->stptr", fun.str_value.str, dlerror());
-		gawk_exit(EXIT_FATAL);
+		//gawk_exit(EXIT_FATAL);
 		return NULL; /* surppress warning */
 	}
 
@@ -364,9 +376,9 @@ do_resist_func(int nargs, awk_value_t *result)
 	set_trampoline(ffi_func);
 
 	ext_func.name = fun.str_value.str;
-	ext_func.function = (awk_value_t *(*)(int, awk_value_t)) (exec_page + func_number * INS_SIZE);
+	ext_func.function = (awk_value_t *(*)(int, awk_value_t*)) (exec_page + func_number * INS_SIZE);
 	ext_func.num_expected_args = arg_num;
-	add_ext_func(NULL, ext_func);
+	add_ext_func(NULL, &ext_func);
 
 	func_number++;
 
@@ -387,7 +399,7 @@ do_pseudo(int nargs, awk_value_t *result)
 	//unsigned int fnum;
 	struct ffi_func_t *ffi_func;
 	//void **arg_values;
-	union func_result result;
+	union func_result ret_val;
 	int i;
 	
 	//fnum = call_ffi_func;
@@ -402,28 +414,28 @@ do_pseudo(int nargs, awk_value_t *result)
 
 		if (ffi_func->arg_types[i] == &ffi_type_void) {
 		} else if (ffi_func->arg_types[i] == &ffi_type_sint) {
-			cawk_get_argument(i, AWK_NUMBER, arg);
+			cawk_get_argument(i, AWK_NUMBER, &arg);
 			*(int *) ffi_func->arg_values[i] =
 					(int) arg.num_value;
 		} else if (ffi_func->arg_types[i] == &ffi_type_uint) {
-			cawk_get_argument(i, AWK_NUMBER, arg);
+			cawk_get_argument(i, AWK_NUMBER, &arg);
 			*(unsigned int *) ffi_func->arg_values[i] =
 					(unsigned int) arg.num_value;
 		} else if (ffi_func->arg_types[i] == &ffi_type_float) {
-			cawk_get_argument(i, AWK_NUMBER, arg);
+			cawk_get_argument(i, AWK_NUMBER, &arg);
 			*(float *) ffi_func->arg_values[i] =
 					(float) arg.num_value;
 		} else if (ffi_func->arg_types[i] == &ffi_type_double) {
-			cawk_get_argument(i, AWK_NUMBER, arg);
+			cawk_get_argument(i, AWK_NUMBER, &arg);
 			*(double *) ffi_func->arg_values[i] =
 					(double) arg.num_value;
 		} else if (ffi_func->arg_types[i] == &ffi_type_pointer) {
-			cawk_get_argument(i, AWK_STRING, arg);
+			cawk_get_argument(i, AWK_STRING, &arg);
 			*(char **)ffi_func->arg_values[i] =
 					(void *) arg.str_value.str;
 #if 0
 		} else if (ffi_func->arg_types[i] == &ffi_type_pointer) {
-			cawk_get_argument(i, AWK_NUMBER, arg);
+			cawk_get_argument(i, AWK_NUMBER, &arg);
 			*(void **)ffi_func->arg_values[i] =
 					(void *) (unsigned int) arg.num_value;
 #endif
@@ -432,24 +444,24 @@ do_pseudo(int nargs, awk_value_t *result)
 
 	// Invoke the function.
 	ffi_call(&ffi_func->cif, FFI_FN(ffi_func->func_ptr),
-		&result, ffi_func->arg_values);
+		&ret_val, ffi_func->arg_values);
 
 	if (ffi_func->func_type == &ffi_type_void) {
 		make_null_string(result);
 		return result;
 	} else if (ffi_func->func_type == &ffi_type_sint) {
-		return make_number((AWKNUM) result.sint, result);
+		return make_number((AWKNUM) ret_val.sint, result);
 	} else if (ffi_func->func_type == &ffi_type_uint) {
-		return make_number((AWKNUM) result.uint, result);
+		return make_number((AWKNUM) ret_val.uint, result);
 	} else if (ffi_func->func_type == &ffi_type_float) {
-		return make_number((AWKNUM) result.flt, result);
+		return make_number((AWKNUM) ret_val.flt, result);
 	} else if (ffi_func->func_type == &ffi_type_double) {
-		return make_number((AWKNUM) result.dbl, result);
+		return make_number((AWKNUM) ret_val.dbl, result);
 	} else if (ffi_func->func_type == &ffi_type_pointer) {
-		return make_number((AWKNUM) (unsigned int) result.ptr, result);
+		return make_number((AWKNUM) (unsigned int) ret_val.ptr, result);
 #if 0
 	} else if (ffi_func->func_type == &ffi_type_pointer) {
-		return make_number((AWKNUM) (unsigned int) result.ptr);
+		return make_number((AWKNUM) (unsigned int) ret_val.ptr, result);
 #endif
 	}
 
@@ -467,6 +479,8 @@ init_cawk(void)
 
 	shlib_number = 0;
 	func_number = 0;
+
+	return awk_true;
 }
 
 static awk_ext_func_t func_table[] = {
