@@ -30,7 +30,7 @@ BEGIN {
 	print random()
 	foo()
 
-	close_shlib("./hello.so")
+	close_shlib("./test.so")
 	#hello()
 }
 
