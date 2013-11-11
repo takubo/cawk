@@ -13,11 +13,11 @@ BEGIN {
 	len = length("hello\n")
 	mem = malloc(len)
 	
-	memset(mem    , 0x68, 1)
-	memset(mem + 1, 0x65, 1)
-	memset(mem + 2, 0x6c, 2)
-	memset(mem + 4, 0x6f, 1)
-	memset(mem + 5, 0x0a, 1)
+	memset(mem    , 0x68, 1)  # 'h'
+	memset(mem + 1, 0x65, 1)  # 'e'
+	memset(mem + 2, 0x6c, 2)  # 'll'
+	memset(mem + 4, 0x6f, 1)  # 'o'
+	memset(mem + 5, 0x0a, 1)  # '\n'
 
 	write(1, mem, len)
 

@@ -59,10 +59,10 @@ struct ffi_func_t {
 	ffi_cif cif;
 	void *func_ptr;
 	enum cawk_type func_cawk_type;
-	ffi_type *func_type;
+	ffi_type *func_ffi_type;
 	int arg_num;
 	enum cawk_type *arg_cawk_types;
-	ffi_type **arg_types;
+	ffi_type **arg_ffi_type;
 	void **arg_values;
 };
 
@@ -265,10 +265,10 @@ do_resist_func(int nargs, awk_value_t *result)
         ffi_cif cif;
 	int arg_num;
 	enum cawk_type *arg_cawk_types;
-	ffi_type **arg_types;
+	ffi_type **arg_ffi_type;
 	void **arg_values;
 	enum cawk_type func_cawk_type;
-	ffi_type *func_type;
+	ffi_type *func_ffi_type;
 	struct ffi_func_t *ffi_func;
 	awk_ext_func_t ext_func;
 
@@ -304,42 +304,42 @@ do_resist_func(int nargs, awk_value_t *result)
 	switch (ret.str_value.str[0]) {
 	case 'v':
 		func_cawk_type = CAWK_VOID;
-		func_type = &ffi_type_void;
+		func_ffi_type = &ffi_type_void;
 		break;
 	case 'i':
 	case 's':
 		func_cawk_type = CAWK_SINT;
-		func_type = &ffi_type_sint;
+		func_ffi_type = &ffi_type_sint;
 		break;
 	case 'u':
 		func_cawk_type = CAWK_UINT;
-		func_type = &ffi_type_uint;
+		func_ffi_type = &ffi_type_uint;
 		break;
 	case 'f':
 		func_cawk_type = CAWK_FLOAT;
-		func_type = &ffi_type_float;
+		func_ffi_type = &ffi_type_float;
 		break;
 	case 'd':
 		func_cawk_type = CAWK_DOUBLE;
-		func_type = &ffi_type_double;
+		func_ffi_type = &ffi_type_double;
 		break;
 	case '$':
 		func_cawk_type = CAWK_STRING;
-		func_type = &ffi_type_pointer;
+		func_ffi_type = &ffi_type_pointer;
 		break;
 	case 'p':
 		func_cawk_type = CAWK_POINTER;
-		func_type = &ffi_type_pointer;
+		func_ffi_type = &ffi_type_pointer;
 		break;
 	default:
-		func_type = NULL; /* surppress warning */
+		func_ffi_type = NULL; /* surppress warning */
 		break;
 	}
 
 	arg_num = strlen(arg.str_value.str);
 
 	emalloc(arg_cawk_types, enum cawk_type *, arg_num * sizeof(enum cawk_type), "resist_func");
-	emalloc(arg_types, ffi_type **, arg_num * sizeof(ffi_type *), "resist_func");
+	emalloc(arg_ffi_type, ffi_type **, arg_num * sizeof(ffi_type *), "resist_func");
 	emalloc(arg_values, void **, arg_num * sizeof(void *), "resist_func");
 
 	for (i = 0; i < arg_num; i++) {
@@ -347,7 +347,7 @@ do_resist_func(int nargs, awk_value_t *result)
 		switch (arg.str_value.str[i]) {
 		case 'v':
 			arg_cawk_types[i] = CAWK_VOID;
-			arg_types[i] = &ffi_type_void;
+			arg_ffi_type[i] = &ffi_type_void;
 			arg_values[i] = NULL;
 			if (arg_num != 1) /* Error TODO */;
 			arg_num = 0;
@@ -355,32 +355,32 @@ do_resist_func(int nargs, awk_value_t *result)
 		case 'i':
 		case 's':
 			arg_cawk_types[i] = CAWK_SINT;
-			arg_types[i] = &ffi_type_sint;
+			arg_ffi_type[i] = &ffi_type_sint;
 			emalloc(arg_values[i], int *, sizeof(int), "resist_func");
 			break;
 		case 'u':
 			arg_cawk_types[i] = CAWK_UINT;
-			arg_types[i] = &ffi_type_uint;
+			arg_ffi_type[i] = &ffi_type_uint;
 			emalloc(arg_values[i], unsigned int *, sizeof(unsigned int), "resist_func");
 			break;
 		case 'f':
 			arg_cawk_types[i] = CAWK_FLOAT;
-			arg_types[i] = &ffi_type_float;
+			arg_ffi_type[i] = &ffi_type_float;
 			emalloc(arg_values[i], float *, sizeof(float), "resist_func");
 			break;
 		case 'd':
 			arg_cawk_types[i] = CAWK_DOUBLE;
-			arg_types[i] = &ffi_type_double;
+			arg_ffi_type[i] = &ffi_type_double;
 			emalloc(arg_values[i], double *, sizeof(double), "resist_func");
 			break;
 		case '$':
 			arg_cawk_types[i] = CAWK_STRING;
-			arg_types[i] = &ffi_type_pointer;
+			arg_ffi_type[i] = &ffi_type_pointer;
 			emalloc(arg_values[i], char **, sizeof(char *), "resist_func");
 			break;
 		case 'p':
 			arg_cawk_types[i] = CAWK_POINTER;
-			arg_types[i] = &ffi_type_pointer;
+			arg_ffi_type[i] = &ffi_type_pointer;
 			emalloc(arg_values[i], void **, sizeof(void *), "resist_func");
 			break;
 		default:
@@ -389,7 +389,7 @@ do_resist_func(int nargs, awk_value_t *result)
 	}
 
         if ((status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
-				arg_num, func_type, arg_types)) != FFI_OK) {
+				arg_num, func_ffi_type, arg_ffi_type)) != FFI_OK) {
                 // Handle the ffi_status error. TODO
         }
 
@@ -398,10 +398,10 @@ do_resist_func(int nargs, awk_value_t *result)
 	ffi_func->func_ptr = func;
 	ffi_func->cif = cif;
 	ffi_func->func_cawk_type = func_cawk_type;
-	ffi_func->func_type = func_type;
+	ffi_func->func_ffi_type = func_ffi_type;
 	ffi_func->arg_num = arg_num;
 	ffi_func->arg_cawk_types = arg_cawk_types;
-	ffi_func->arg_types = arg_types;
+	ffi_func->arg_ffi_type = arg_ffi_type;
 	ffi_func->arg_values = arg_values;
 
 	set_trampoline(ffi_func);
