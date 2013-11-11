@@ -22,6 +22,12 @@ hello2(char *name)
 	printf("hello, %s\n", name);
 }
 
+char *
+hello3(void)
+{
+	return "bye";
+}
+
 double
 square(double n)
 {

@@ -11,6 +11,7 @@ BEGIN {
 
 	resist_func("./hello.so",  "hello",  "v", "v")
 	resist_func("./hello.so",  "hello2", "v", "$")
+	resist_func("./hello.so",  "hello3", "$", "v")
 	resist_func("./hello.so",  "square", "d", "d")
 	resist_func("./hello.so",  "square", "i", "di")
 	resist_func("libm.so",   "abs",    "i", "i")
@@ -20,6 +21,7 @@ BEGIN {
 
 	hello()
 	hello2("AWK")
+	print hello3()
 	print square(-3)
 	#print cut_p_disit(3.141593, 3)
 	print abs(-89)

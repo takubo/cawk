@@ -23,18 +23,28 @@
 //# define EXIT_FATAL   2
 //-------------
 
+int plugin_is_GPL_compatible;
+
 #if ARCH_X86
 	#define INS_SIZE 16
 #elif ARCH_X64
 	#define INS_SIZE 32
 #endif
 
-int plugin_is_GPL_compatible;
-
 #define cawk_get_argument(count, wanted, result)	\
 	if (!get_argument(count, wanted, result)) {\
 		\
 	}
+
+enum cawk_type {
+	CAWK_VOID,
+	CAWK_SINT,
+	CAWK_UINT,
+	CAWK_FLOAT,
+	CAWK_DOUBLE,
+	CAWK_STRING,
+	CAWK_POINTER,
+};
 
 static int pagesize;
 
@@ -48,8 +58,10 @@ static struct shlib_t shlib[16];
 struct ffi_func_t {
 	ffi_cif cif;
 	void *func_ptr;
+	enum cawk_type func_cawk_type;
 	ffi_type *func_type;
 	int arg_num;
+	enum cawk_type *arg_cawk_types;
 	ffi_type **arg_types;
 	void **arg_values;
 };
@@ -64,7 +76,7 @@ static unsigned int func_number;
 static struct ffi_func_t *call_ffi_func;
 
 static awk_value_t *do_pseudo(int nargs, awk_value_t *result);
-static void set_trampoline(struct ffi_func_t *);
+static void set_trampoline(struct ffi_func_t *ffi_func_ptr);
 static void *lookup_shlib(const char *name);
 static awk_value_t *do_resist_func(int nargs, awk_value_t *result);
 static awk_value_t *do_load_shlib(int nargs, awk_value_t *result);
@@ -252,8 +264,10 @@ do_resist_func(int nargs, awk_value_t *result)
 	void *func;
         ffi_cif cif;
 	int arg_num;
+	enum cawk_type *arg_cawk_types;
 	ffi_type **arg_types;
 	void **arg_values;
+	enum cawk_type func_cawk_type;
 	ffi_type *func_type;
 	struct ffi_func_t *ffi_func;
 	awk_ext_func_t ext_func;
@@ -289,25 +303,32 @@ do_resist_func(int nargs, awk_value_t *result)
 
 	switch (ret.str_value.str[0]) {
 	case 'v':
+		func_cawk_type = CAWK_VOID;
 		func_type = &ffi_type_void;
 		break;
 	case 'i':
 	case 's':
+		func_cawk_type = CAWK_SINT;
 		func_type = &ffi_type_sint;
 		break;
 	case 'u':
+		func_cawk_type = CAWK_UINT;
 		func_type = &ffi_type_uint;
 		break;
 	case 'f':
+		func_cawk_type = CAWK_FLOAT;
 		func_type = &ffi_type_float;
 		break;
 	case 'd':
+		func_cawk_type = CAWK_DOUBLE;
 		func_type = &ffi_type_double;
 		break;
 	case '$':
+		func_cawk_type = CAWK_STRING;
 		func_type = &ffi_type_pointer;
 		break;
 	case 'p':
+		func_cawk_type = CAWK_POINTER;
 		func_type = &ffi_type_pointer;
 		break;
 	default:
@@ -317,6 +338,7 @@ do_resist_func(int nargs, awk_value_t *result)
 
 	arg_num = strlen(arg.str_value.str);
 
+	emalloc(arg_cawk_types, enum cawk_type *, arg_num * sizeof(enum cawk_type), "resist_func");
 	emalloc(arg_types, ffi_type **, arg_num * sizeof(ffi_type *), "resist_func");
 	emalloc(arg_values, void **, arg_num * sizeof(void *), "resist_func");
 
@@ -324,6 +346,7 @@ do_resist_func(int nargs, awk_value_t *result)
 		//printf ("%c\n",arg.str_value.str[i + 1]);
 		switch (arg.str_value.str[i]) {
 		case 'v':
+			arg_cawk_types[i] = CAWK_VOID;
 			arg_types[i] = &ffi_type_void;
 			arg_values[i] = NULL;
 			if (arg_num != 1) /* Error TODO */;
@@ -331,26 +354,32 @@ do_resist_func(int nargs, awk_value_t *result)
 			break;
 		case 'i':
 		case 's':
+			arg_cawk_types[i] = CAWK_SINT;
 			arg_types[i] = &ffi_type_sint;
 			emalloc(arg_values[i], int *, sizeof(int), "resist_func");
 			break;
 		case 'u':
+			arg_cawk_types[i] = CAWK_UINT;
 			arg_types[i] = &ffi_type_uint;
 			emalloc(arg_values[i], unsigned int *, sizeof(unsigned int), "resist_func");
 			break;
 		case 'f':
+			arg_cawk_types[i] = CAWK_FLOAT;
 			arg_types[i] = &ffi_type_float;
 			emalloc(arg_values[i], float *, sizeof(float), "resist_func");
 			break;
 		case 'd':
+			arg_cawk_types[i] = CAWK_DOUBLE;
 			arg_types[i] = &ffi_type_double;
 			emalloc(arg_values[i], double *, sizeof(double), "resist_func");
 			break;
 		case '$':
+			arg_cawk_types[i] = CAWK_STRING;
 			arg_types[i] = &ffi_type_pointer;
 			emalloc(arg_values[i], char **, sizeof(char *), "resist_func");
 			break;
 		case 'p':
+			arg_cawk_types[i] = CAWK_POINTER;
 			arg_types[i] = &ffi_type_pointer;
 			emalloc(arg_values[i], void **, sizeof(void *), "resist_func");
 			break;
@@ -368,8 +397,10 @@ do_resist_func(int nargs, awk_value_t *result)
 
 	ffi_func->func_ptr = func;
 	ffi_func->cif = cif;
+	ffi_func->func_cawk_type = func_cawk_type;
 	ffi_func->func_type = func_type;
 	ffi_func->arg_num = arg_num;
+	ffi_func->arg_cawk_types = arg_cawk_types;
 	ffi_func->arg_types = arg_types;
 	ffi_func->arg_values = arg_values;
 
@@ -412,33 +443,39 @@ do_pseudo(int nargs, awk_value_t *result)
 	for (i = 0; i < ffi_func->arg_num; i++) {
 		awk_value_t arg;
 
-		if (ffi_func->arg_types[i] == &ffi_type_void) {
-		} else if (ffi_func->arg_types[i] == &ffi_type_sint) {
+		switch (ffi_func->arg_cawk_types[i]) {
+		case CAWK_VOID:
+			break;
+		case CAWK_SINT:
 			cawk_get_argument(i, AWK_NUMBER, &arg);
 			*(int *) ffi_func->arg_values[i] =
 					(int) arg.num_value;
-		} else if (ffi_func->arg_types[i] == &ffi_type_uint) {
+			break;
+		case CAWK_UINT:
 			cawk_get_argument(i, AWK_NUMBER, &arg);
 			*(unsigned int *) ffi_func->arg_values[i] =
 					(unsigned int) arg.num_value;
-		} else if (ffi_func->arg_types[i] == &ffi_type_float) {
+			break;
+		case CAWK_FLOAT:
 			cawk_get_argument(i, AWK_NUMBER, &arg);
 			*(float *) ffi_func->arg_values[i] =
 					(float) arg.num_value;
-		} else if (ffi_func->arg_types[i] == &ffi_type_double) {
+			break;
+		case CAWK_DOUBLE:
 			cawk_get_argument(i, AWK_NUMBER, &arg);
 			*(double *) ffi_func->arg_values[i] =
 					(double) arg.num_value;
-		} else if (ffi_func->arg_types[i] == &ffi_type_pointer) {
+			break;
+		case CAWK_STRING:
 			cawk_get_argument(i, AWK_STRING, &arg);
 			*(char **)ffi_func->arg_values[i] =
-					(void *) arg.str_value.str;
-#if 0
-		} else if (ffi_func->arg_types[i] == &ffi_type_pointer) {
+					(char *) arg.str_value.str;
+			break;
+		case CAWK_POINTER:
 			cawk_get_argument(i, AWK_NUMBER, &arg);
 			*(void **)ffi_func->arg_values[i] =
 					(void *) (unsigned int) arg.num_value;
-#endif
+			break;
                 }
 	}
 
@@ -446,27 +483,24 @@ do_pseudo(int nargs, awk_value_t *result)
 	ffi_call(&ffi_func->cif, FFI_FN(ffi_func->func_ptr),
 		&ret_val, ffi_func->arg_values);
 
-	if (ffi_func->func_type == &ffi_type_void) {
-		make_null_string(result);
-		return result;
-	} else if (ffi_func->func_type == &ffi_type_sint) {
+	switch (ffi_func->func_cawk_type) {
+	case CAWK_VOID:
+		return make_null_string(result);
+	case CAWK_SINT:
 		return make_number((AWKNUM) ret_val.sint, result);
-	} else if (ffi_func->func_type == &ffi_type_uint) {
+	case CAWK_UINT:
 		return make_number((AWKNUM) ret_val.uint, result);
-	} else if (ffi_func->func_type == &ffi_type_float) {
+	case CAWK_FLOAT:
 		return make_number((AWKNUM) ret_val.flt, result);
-	} else if (ffi_func->func_type == &ffi_type_double) {
+	case CAWK_DOUBLE:
 		return make_number((AWKNUM) ret_val.dbl, result);
-	} else if (ffi_func->func_type == &ffi_type_pointer) {
+	case CAWK_STRING:
+		return make_const_string(ret_val.ptr, strlen(ret_val.ptr), result);
+	case CAWK_POINTER:
 		return make_number((AWKNUM) (unsigned int) ret_val.ptr, result);
-#if 0
-	} else if (ffi_func->func_type == &ffi_type_pointer) {
-		return make_number((AWKNUM) (unsigned int) ret_val.ptr, result);
-#endif
 	}
 
-	make_null_string(result);
-	return result;
+	return make_null_string(result);
 }
 
 /* init_cawk --- initialization routine */
