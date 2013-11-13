@@ -425,12 +425,11 @@ do_pseudo(int nargs, awk_value_t *result)
 		float flt;
 		double dbl;
 		void *ptr;
-	};
+	} ret_val;
 
 	//unsigned int fnum;
 	struct ffi_func_t *ffi_func;
 	//void **arg_values;
-	union func_result ret_val;
 	int i;
 	
 	//fnum = call_ffi_func;
