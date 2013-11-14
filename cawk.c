@@ -41,14 +41,10 @@ enum cawk_type {
 	CAWK_POINTER,
 };
 
-static int pagesize;
-
 struct shlib_t {
 	char *lib_name;
 	void *lib_ptr;
 };
-
-static struct shlib_t shlib[16];
 
 struct ffi_func_t {
 	ffi_cif cif;
@@ -63,19 +59,22 @@ struct ffi_func_t {
 
 //static struct ffi_func_t *ffi_func_args[512];
 
+static int pagesize;
+
 static void *exec_page;
 
 static unsigned int shlib_number;
+static struct shlib_t shlib[16];
 
 static unsigned int func_number;
 static struct ffi_func_t *call_ffi_func;
 
-static awk_value_t *do_pseudo(int nargs, awk_value_t *result);
-static void set_trampoline(struct ffi_func_t *ffi_func_ptr);
 static void *lookup_shlib(const char *name);
-static awk_value_t *do_resist_func(int nargs, awk_value_t *result);
 static awk_value_t *do_load_shlib(int nargs, awk_value_t *result);
 static awk_value_t *do_close_shlib(int nargs, awk_value_t *result);
+static void set_trampoline(int fnum, struct ffi_func_t *ffi_func_ptr);
+static awk_value_t *do_resist_func(int nargs, awk_value_t *result);
+static awk_value_t *do_pseudo(int nargs, awk_value_t *result);
 static awk_bool_t init_cawk(void);
 
 static const gawk_api_t *api;	/* for convenience macros to work */
@@ -87,6 +86,18 @@ static awk_bool_t (*init_func)(void) = init_cawk;
 	if (!get_argument(count, wanted, result)) {\
 		\
 	}
+
+static void *
+lookup_shlib(const char *name)
+{
+	int i;
+
+	for (i = 0; i < shlib_number; i++)
+		if (!strcmp(name, shlib[i].lib_name))
+			return shlib[i].lib_ptr;
+
+	return NULL;
+}
 
 static awk_value_t *
 do_load_shlib(int nargs, awk_value_t *result)
@@ -150,106 +161,92 @@ do_close_shlib(int nargs, awk_value_t *result)
 }
 
 static void
-set_trampoline(struct ffi_func_t *ffi_func_ptr)
+set_trampoline(int fnum, struct ffi_func_t *ffi_func_ptr)
 {
-	char ins[INS_SIZE];
-	signed int addr_diff;
+	unsigned char ins[INS_SIZE];
+	long addr_diff;
 	int i;
 
 	i = 0;
 
 #if ARCH_X86
-	// mov imm to func_number
+	// mov imm to call_ffi_func
 	ins[i++] = 0xc7;	// x86/x64 mov instruction
 	ins[i++] = 0x05;	// ModR/M Byte
-	ins[i++] = (char)(((unsigned long) &call_ffi_func      ) & 0xff);
-	ins[i++] = (char)(((unsigned long) &call_ffi_func >>  8) & 0xff);
-	ins[i++] = (char)(((unsigned long) &call_ffi_func >> 16) & 0xff);
-	ins[i++] = (char)(((unsigned long) &call_ffi_func >> 24) & 0xff);
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr      ) & 0xff);
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr >>  8) & 0xff);
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 16) & 0xff);
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 24) & 0xff);
 
-	// jmp to do_pseudo
-	// x86/x64 jmp instruction
-	//	E9 cd JMP rel32
-	#define LENGTH_OF_JMP_INSTRUCTION	5
-	addr_diff = (void*)do_pseudo - (void*)(exec_page
-			+ INS_SIZE * func_number + i + LENGTH_OF_JMP_INSTRUCTION);
-	ins[i++] = 0xe9;	// x86/x64 jmp instruction
-	ins[i++] = (char)(((signed long) addr_diff      ) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >>  8) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >> 16) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >> 24) & 0xff);
+	ins[i++] = ((unsigned long) &call_ffi_func       ) & 0xffu;
+	ins[i++] = ((unsigned long) &call_ffi_func >>  8u) & 0xffu;
+	ins[i++] = ((unsigned long) &call_ffi_func >> 16u) & 0xffu;
+	ins[i++] = ((unsigned long) &call_ffi_func >> 24u) & 0xffu;
 
-	/* fill as 'NOP' instruction */
-	//printf("##%d\n",i);
-	for ( ; i < INS_SIZE; i++)
-		ins[i] = 0x90;
-
+	ins[i++] = ((unsigned long) ffi_func_ptr       ) & 0xffu;
+	ins[i++] = ((unsigned long) ffi_func_ptr >>  8u) & 0xffu;
+	ins[i++] = ((unsigned long) ffi_func_ptr >> 16u) & 0xffu;
+	ins[i++] = ((unsigned long) ffi_func_ptr >> 24u) & 0xffu;
 #elif ARCH_X64
 	#define LENGTH_OF_MOV_INSTRUCTION	11
 
-	// mov imm to func_number
+	// mov imm to call_ffi_func
 	// move the most significant 4 bytes of ffi_func_ptr
 	ins[i++] = 0x48;	// REX Prefix
 	ins[i++] = 0xc7;	// x86/x64 mov instruction
 	ins[i++] = 0x05;	// ModR/M Byte
 
 	addr_diff = (void*)&call_ffi_func - (void*)(exec_page
-			+ INS_SIZE * func_number + i + LENGTH_OF_MOV_INSTRUCTION);
+			+ INS_SIZE * fnum + i + LENGTH_OF_MOV_INSTRUCTION);
 
-	ins[i++] = (char)(((signed long) addr_diff      ) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >>  8) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >> 16) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >> 24) & 0xff);
+	ins[i++] = (addr_diff      ) & 0xff;
+	ins[i++] = (addr_diff >>  8) & 0xff;
+	ins[i++] = (addr_diff >> 16) & 0xff;
+	ins[i++] = (addr_diff >> 24) & 0xff;
 
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr      ) & 0xff);
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr >>  8) & 0xff);
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 16) & 0xff);
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 24) & 0xff);
+	ins[i++] = ((unsigned long) ffi_func_ptr       ) & 0xffu;
+	ins[i++] = ((unsigned long) ffi_func_ptr >>  8u) & 0xffu;
+	ins[i++] = ((unsigned long) ffi_func_ptr >> 16u) & 0xffu;
+	ins[i++] = ((unsigned long) ffi_func_ptr >> 24u) & 0xffu;
 
-	// mov imm to func_number
+	// mov imm to call_ffi_func
 	// move the lower 4 bytes of ffi_func_ptr
 	ins[i++] = 0x48;	// REX Prefix
 	ins[i++] = 0xc7;	// x86/x64 mov instruction
 	ins[i++] = 0x05;	// ModR/M Byte
 
 	addr_diff = (void*)&call_ffi_func - (void*)(exec_page
-			+ INS_SIZE * func_number + i + LENGTH_OF_MOV_INSTRUCTION) - 2;
+			+ INS_SIZE * fnum + i + LENGTH_OF_MOV_INSTRUCTION) - 2;
 
-	ins[i++] = (char)(((signed long) addr_diff      ) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >>  8) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >> 16) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >> 24) & 0xff);
+	ins[i++] = (addr_diff      ) & 0xff;
+	ins[i++] = (addr_diff >>  8) & 0xff;
+	ins[i++] = (addr_diff >> 16) & 0xff;
+	ins[i++] = (addr_diff >> 24) & 0xff;
 
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 32) & 0xff);
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 40) & 0xff);
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 48) & 0xff);
-	ins[i++] = (char)(((unsigned int) ffi_func_ptr >> 56) & 0xff);
+	ins[i++] = ((unsigned long) ffi_func_ptr >> 32u) & 0xffu;
+	ins[i++] = ((unsigned long) ffi_func_ptr >> 40u) & 0xffu;
+	ins[i++] = ((unsigned long) ffi_func_ptr >> 48u) & 0xffu;
+	ins[i++] = ((unsigned long) ffi_func_ptr >> 56u) & 0xffu;
+#endif
 
+#if ARCH_X86 || ARCH_X64
 	// jmp to do_pseudo
 	// x86/x64 jmp instruction
 	//	E9 cd JMP rel32
+
 	#define LENGTH_OF_JMP_INSTRUCTION	5
 
 	addr_diff = (void*)do_pseudo - (void*)(exec_page
-			+ INS_SIZE * func_number + i + LENGTH_OF_JMP_INSTRUCTION);
+			+ INS_SIZE * fnum + i + LENGTH_OF_JMP_INSTRUCTION);
 
 	ins[i++] = 0xe9;	// x86/x64 jmp instruction
-	ins[i++] = (char)(((signed long) addr_diff      ) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >>  8) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >> 16) & 0xff);
-	ins[i++] = (char)(((signed long) addr_diff >> 24) & 0xff);
+	ins[i++] = (addr_diff      ) & 0xff;
+	ins[i++] = (addr_diff >>  8) & 0xff;
+	ins[i++] = (addr_diff >> 16) & 0xff;
+	ins[i++] = (addr_diff >> 24) & 0xff;
 
-	/* fill as 'NOP' instruction */
-	//printf("##%d\n",i);
+	/* fill by 'NOP' instruction */
 	for ( ; i < INS_SIZE; i++)
 		ins[i] = 0x90;
 #endif
 
-	memcpy(exec_page + func_number * INS_SIZE, ins, INS_SIZE);
+	memcpy(exec_page + fnum * INS_SIZE, ins, INS_SIZE);
 
 #if 0
 	printf("%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n"
@@ -284,18 +281,6 @@ set_trampoline(struct ffi_func_t *ffi_func_ptr)
 			exec_page
 	      );
 #endif
-}
-
-static void *
-lookup_shlib(const char *name)
-{
-	int i;
-
-	for (i = 0; i < shlib_number; i++)
-		if (!strcmp(name, shlib[i].lib_name))
-			return shlib[i].lib_ptr;
-
-	return NULL;
 }
 
 static awk_value_t *
@@ -379,6 +364,7 @@ do_resist_func(int nargs, awk_value_t *result)
 		func_ffi_type = &ffi_type_pointer;
 		break;
 	default:
+		func_cawk_type = CAWK_VOID; /* surppress warning */
 		func_ffi_type = NULL; /* surppress warning */
 		break;
 	}
@@ -451,7 +437,7 @@ do_resist_func(int nargs, awk_value_t *result)
 	ffi_func->arg_ffi_type = arg_ffi_type;
 	ffi_func->arg_values = arg_values;
 
-	set_trampoline(ffi_func);
+	set_trampoline(func_number, ffi_func);
 
 	ext_func.name = fun.str_value.str;
 	ext_func.function = (awk_value_t *(*)(int, awk_value_t*)) (exec_page + func_number * INS_SIZE);
