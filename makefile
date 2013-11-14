@@ -1,14 +1,17 @@
 uname_m = $(shell uname -m)
 
-ifeq ($(uname_m), i686)
+# Linux format
+ifeq (${uname_m}, i686)
 	ARCH = ARCH_X86
 endif
 
-ifeq ($(uname_m), x86_64)
+# Linux format
+ifeq (${uname_m}, x86_64)
 	ARCH = ARCH_X64
 endif
 
-ifeq ($(uname_m), amd64)
+# FreeBSD format
+ifeq (${uname_m}, amd64)
 	ARCH = ARCH_X64
 endif
 
@@ -19,14 +22,22 @@ CFLAGS = -Wall -fPIC -shared -g -c -O2 \
 
 LDFLAGS = -shared
 
-all: cawk.so test.so
+.PHONY : test all clean
+
+test: cawk.so test.so
 	${HOME}/gawk-4.1.0/gawk -f test.awk
+
+all: cawk.so
 
 cawk.so: cawk.c makefile
 	gcc cawk.c ${CFLAGS} -o cawk.o
 	gcc cawk.o ${LDFLAGS} -lffi -o cawk.so
 
 CFLAGS2 = -Wall -fPIC -shared -g -c -O2 
+
 test.so: test.c makefile
 	gcc test.c ${CFLAGS2} -o test.o
 	gcc test.o ${LDFLAGS} -o test.so
+
+clean:
+	rm *.o *.so
